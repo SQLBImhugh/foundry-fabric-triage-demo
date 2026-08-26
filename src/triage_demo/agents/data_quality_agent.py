@@ -52,7 +52,16 @@ class DataQualityAgent:
         request: BIRequest,
         datasets: dict[str, DatasetSource],
         reason: str = "",
+        ledger: Any = None,
     ) -> DataQualityFinding:
+        """Inspect the registered tables and return a structured finding.
+
+        ``ledger`` is the orchestrator's :class:`PolicyLedger`. It is shared
+        rather than per-agent on purpose: a budget that only covers the
+        orchestrator is not a budget for the run. Without this, a second agent
+        could burn an unbounded number of turns and tokens while the reported
+        totals stayed small.
+        """
         if not datasets:
             return DataQualityFinding(
                 has_issue=False,
@@ -81,7 +90,13 @@ class DataQualityAgent:
         model_payload: dict[str, Any] = {}
 
         for _ in range(self._max_turns):
+            if ledger is not None:
+                ledger.charge_llm_turn()
+
             resp = await self._provider.complete(messages=messages, tools=DQ_TOOLS)
+
+            if ledger is not None:
+                ledger.charge_tokens(resp.total_tokens)
 
             if not resp.tool_calls:
                 model_payload = _parse_json_object(resp.content)
@@ -106,6 +121,8 @@ class DataQualityAgent:
             )
 
             for call in resp.tool_calls:
+                if ledger is not None:
+                    ledger.charge_tool_call(call.name)
                 result = self._execute(call.name, call.arguments, datasets)
                 if call.name == "check_duplicates" and isinstance(result, dict):
                     ev = result.get("_evidence")
@@ -198,22 +215,33 @@ class DataQualityAgent:
             )
 
         if truth:
+            # The model's prose is discarded when it contradicts the scan.
+            # Returning has_issue=True alongside "looks fine to me" would put a
+            # self-contradicting sentence in a Teams message.
+            contradicted = claimed is False
             return DataQualityFinding(
                 has_issue=True,
                 issue_type="duplicates",
                 confidence=1.0,
-                detail=detail or evidence.headline(),
+                detail=evidence.headline() if contradicted else (detail or evidence.headline()),
                 evidence=evidence,
                 checked_tables=checked,
-                recommended_action=recommended or "flag_and_notify",
+                recommended_action=(
+                    "flag_and_notify" if contradicted else (recommended or "flag_and_notify")
+                ),
                 agent_name=self.AGENT_NAME,
             )
 
+        contradicted = claimed is True
         return DataQualityFinding(
             has_issue=False,
             issue_type="none",
             confidence=1.0,
-            detail=detail or f"No duplicate keys found in {evidence.table}.",
+            detail=(
+                f"No duplicate keys found in {evidence.table}."
+                if contradicted
+                else (detail or f"No duplicate keys found in {evidence.table}.")
+            ),
             evidence=evidence,
             checked_tables=checked,
             recommended_action="no_action",

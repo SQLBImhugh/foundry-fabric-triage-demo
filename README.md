@@ -7,7 +7,6 @@ one bounded remediation, and reports to Teams.
 It runs **fully offline** with mock tools and a scripted provider, so you can
 rehearse it on a laptop with no tenant, no Azure login, and no network. Point
 it at a real tenant when you're ready.
-
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
@@ -39,9 +38,10 @@ Scenarios 3 and 4 are the ones worth building the conversation around.
 ## Design decisions that carry the weight
 
 **Limits live in the controller, not the prompt.** `PolicyLedger` charges every
-turn and every tool call before it happens. One remediation per run, a tool-call
-budget, a token budget, a wall clock, and an allowlist. No wording change raises
-any of them.
+turn and every tool call before it happens, **across every agent in the run** —
+the Data Quality agent shares the same ledger. One remediation per run, a
+tool-call budget, a token budget, a wall clock, and an allowlist. No wording
+change raises any of them.
 
 **A refusal is data, not a crash.** When the controller blocks an action it
 returns the refusal *to the agent*, which can then escalate to a human. Killing
@@ -49,13 +49,15 @@ the run at that moment would leave the operator with silence.
 
 **Deterministic evidence beats model assertion.** Duplicate detection is a plain
 CSV scan. The Data Quality agent interprets the numbers; it does not produce
-them. If the model contradicts the scan, the scan wins and the disagreement is
-logged — see `test_scan_overrides_a_model_that_denies_the_duplicates`.
+them. If the model contradicts the scan, the scan wins, its prose is discarded,
+and the disagreement is logged — see `test_contradicted_denial_discards_the_models_prose`.
 
 **Success has to be earned.** If the agent reports `resolved` but no remediation
-actually succeeded, the controller downgrades it to `needs_human`. This is not
-hypothetical: the production platform shipped a recovery agent that reported "Fixed"
-three times in a row while the underlying job kept failing.
+succeeded, `flagged_data_quality` but no flag row was written, or
+`duplicate_suppressed` but no open incident matched, the controller downgrades it
+to `needs_human`. This is not hypothetical: the production platform shipped a recovery
+agent that reported "Fixed" three times in a row while the underlying job kept
+failing.
 
 **Every terminal outcome is persisted** — crashes, timeouts and policy blocks
 included, not just successes. The same system originally recorded only
@@ -95,10 +97,11 @@ src/triage_demo/
   store/incidents.py   Dedup, occurrence counting, redaction
 
 scenarios/*.yaml       Five runnable scenarios with assertions
-mock/                  Seeded data + inbox messages
+mock/                  Seeded data + four inbox messages
 scripts/               Foundry agent registration
 docs/                  Plan, architecture, run sheet, FAQ, provisioning
-tests/                 90 tests, all offline
+tests/                 122 tests, all offline
+                       test_hardening.py pins the post-review fixes
 ```
 
 ## Docs
@@ -130,7 +133,7 @@ python scripts\register_foundry_agents.py --dry-run
 ## Tests
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 90 tests, no network
+.\.venv\Scripts\python.exe -m pytest -q      # 122 tests, no network
 .\.venv\Scripts\python.exe -m ruff check .
 ```
 

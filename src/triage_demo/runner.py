@@ -30,7 +30,7 @@ from triage_demo.tools.dataset import DatasetSource
 from triage_demo.tools.flags import DataQualityFlagTable
 from triage_demo.tools.inbox import GraphInbox, MockInbox
 from triage_demo.tools.powerbi import LivePowerBIClient, MockPowerBIClient
-from triage_demo.tools.teams import MockTeamsNotifier, WebhookTeamsNotifier
+from triage_demo.tools.teams import MockTeamsNotifier, WorkflowsWebhookTeamsNotifier
 
 logger = logging.getLogger("triage.runner")
 
@@ -144,19 +144,21 @@ class TriageRunner:
 
     def build_teams(self):
         if self.settings.triage_tool_mode == "live" and self.settings.teams_webhook_url:
-            return WebhookTeamsNotifier(self.settings.teams_webhook_url)
+            return WorkflowsWebhookTeamsNotifier(self.settings.teams_webhook_url)
         return MockTeamsNotifier()
 
     # --- scenarios ---------------------------------------------------------
 
-    def prepare(self, scenario: Scenario) -> None:
+    def prepare(self, scenario: Scenario, *, keep_incidents: bool = False) -> None:
         if scenario.reset_flags:
             self.flag_table.reset()
-        if scenario.reset_incidents:
+        if scenario.reset_incidents and not keep_incidents:
             self.store.reset()
 
-    async def run_scenario(self, scenario: Scenario) -> list[RunArtifacts]:
-        self.prepare(scenario)
+    async def run_scenario(
+        self, scenario: Scenario, *, keep_incidents: bool = False
+    ) -> list[RunArtifacts]:
+        self.prepare(scenario, keep_incidents=keep_incidents)
         request = MockInbox.load(self.base_dir / scenario.email)
 
         datasets = {

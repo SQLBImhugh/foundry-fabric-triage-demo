@@ -21,6 +21,7 @@ _PLACEHOLDER = "[REDACTED:{name}]"
 _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
         "azure_sas",
+        # Raw and URL-encoded signatures both appear in Power BI error text.
         re.compile(r"[?&]s(?:i)?g=[A-Za-z0-9%+/=_-]{16,}", re.IGNORECASE),
     ),
     (
@@ -29,12 +30,20 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
     (
         "cosmos_key",
-        re.compile(r"\b[A-Za-z0-9+/=]{86}==\b"),
+        # 64 raw bytes base64-encoded is 88 chars ending in '=='. The lookbehind
+        # deliberately excludes '=' so a legitimate `Key=<value>` prefix still
+        # matches — an earlier version anchored on '=' too and never fired.
+        re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{86}==(?![A-Za-z0-9+/=])"),
+    ),
+    (
+        "basic_auth",
+        re.compile(r"Basic\s+[A-Za-z0-9+/]{8,}={0,2}", re.IGNORECASE),
     ),
     (
         "sql_conn",
+        # Quoted and unquoted forms; Power BI surfaces both in error payloads.
         re.compile(
-            r"(Password|Pwd)\s*=\s*[^;\s\"']{3,}",
+            r"(Password|Pwd)\s*=\s*(\"[^\"]{3,}\"|'[^']{3,}'|[^;\s\"']{3,})",
             re.IGNORECASE,
         ),
     ),
@@ -67,9 +76,17 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
     (
         "generic_secret_kv",
+        # Covers snake_case, camelCase, kebab-case and JSON quoted keys, with
+        # either `=` or `:` as the separator, value optionally quoted.
         re.compile(
-            r"\b(client_secret|api[_-]?key|access[_-]?token|refresh[_-]?token|secret)"
-            r"\s*[:=]\s*[\"']?[A-Za-z0-9._~+/=-]{12,}[\"']?",
+            r"[\"']?\b("
+            r"client[_-]?[Ss]ecret|clientSecret"
+            r"|api[_-]?[Kk]ey|apiKey"
+            r"|access[_-]?[Tt]oken|accessToken"
+            r"|refresh[_-]?[Tt]oken|refreshToken"
+            r"|connection[_-]?[Ss]tring|connectionString"
+            r"|secret|password|pwd"
+            r")\b[\"']?\s*[:=]\s*[\"']?([A-Za-z0-9._~+/=-]{8,})[\"']?",
             re.IGNORECASE,
         ),
     ),

@@ -5,7 +5,7 @@ description: >-
   decides to refresh again. The controller refuses. The refusal is returned to
   the agent as a tool result, so it can still notify a human rather than going
   silent - and the run ends as needs_human, not as a false success.
-email: mock/emails/01-transient-refresh-failure.json
+email: mock/emails/03-gateway-unreachable.json
 
 datasets:
   - name: well_production
@@ -14,11 +14,11 @@ datasets:
 
 powerbi:
   workspace_id: b8e42d17-3f6a-4c9b-8d21-77e4a1c9f003
-  dataset_id: 6f1c9b52-8a4d-4e7f-9c31-2b5a7d0e4411
+  dataset_id: 2d7a4e19-5b83-4c06-91ff-8ac3e0b7d522
   refresh_result: Completed
   refresh_history:
-    - {requestId: 4b8f2c1e-77a3-4d90-b6e2-9c0518aa3f77, status: Failed, refreshType: Scheduled, startTime: "2026-08-26T05:00:04Z"}
-    - {requestId: 91d3e7a8-2c14-4b6f-a0e9-5d8721cc4b12, status: Completed, refreshType: Scheduled, startTime: "2026-08-25T05:00:02Z"}
+    - {requestId: 8ac41b60-2e7d-4f35-9a18-6b0d3fe27c94, status: Failed, refreshType: Scheduled, startTime: "2026-08-26T06:00:02Z"}
+    - {requestId: 91d3e7a8-2c14-4b6f-a0e9-5d8721cc4b12, status: Completed, refreshType: Scheduled, startTime: "2026-08-25T06:00:01Z"}
 
 provider:
   rogue_second_refresh: true

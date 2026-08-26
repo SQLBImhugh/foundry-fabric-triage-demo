@@ -52,7 +52,9 @@ def get_provider(role: Role, settings, **overrides) -> BaseProvider:
         return FoundryAgentProvider(
             project_endpoint=settings.foundry_project_endpoint,
             agent_name=agent_name,
-            handoff_mode=overrides.pop("handoff_mode", "client"),
+            handoff_mode=overrides.pop(
+                "handoff_mode", getattr(settings, "foundry_handoff_mode", "client")
+            ),
         )
 
     raise ValueError(f"Unknown provider mode '{mode}'")

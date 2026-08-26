@@ -1,6 +1,6 @@
 # Build plan — BI Request Triage & Resolution demo
 
-**Status**: Phase 1 complete (offline demo runs end to end, 90 tests green).
+**Status**: Phase 1 complete (offline demo runs end to end, 122 tests green).
 Phases 2–7 are tenant-dependent and not started.
 
 **Goal**: a live, interactive demo of an agentic BI triage loop on Azure AI
@@ -77,12 +77,18 @@ Everything runs with no tenant, no Azure login, no network.
 | OTel GenAI spans with no-op fallback | `src/triage_demo/observability.py` |
 | 5 scenarios with machine-checked assertions | `scenarios/` |
 | CLI with live event rendering | `src/triage_demo/cli.py` |
-| 90 tests | `tests/` |
+| 122 tests | `tests/` |
 
 **Exit criteria (met)**: all five scenarios pass their assertions offline;
-`ruff check` clean; every scenario is reproducible byte-for-byte across runs.
+`ruff check` clean; every scenario produces the same outcome, the same tool
+sequence and the same evidence numbers on every run. (Timestamps and generated
+ids do vary — the *decisions* are reproducible, not the bytes.)
 
-**Effort**: ~1 engineer-day equivalent.
+**Effort**: ~1 engineer-day equivalent, plus a review pass.
+
+**Post-build review**: a rubber-duck pass found 14 issues; the material ones are
+fixed and pinned by regression tests in `tests/test_hardening.py`. Summary in
+[Review findings](#review-findings) below.
 
 ---
 
@@ -155,6 +161,13 @@ Register **both** handoff shapes and show both:
 - `--handoff connected` — the DQ agent is attached as a connected agent and
   Foundry performs the handoff server-side.
 
+**Connected mode is show-only until the DQ tools are server-callable.** Foundry
+executes a connected agent server-side, so its tools must be reachable by
+Foundry; `check_duplicates` is a local scan in the calling process. Exposing it
+via OpenAPI or an Azure Function is the prerequisite, and is not in scope for
+this demo. Register it, show the shape and the trace, and say plainly that the
+running configuration is client orchestration.
+
 Connected agents demo better. Client orchestration is what you ship, because the
 ledger has to sit between the two agents to mean anything. Showing both, and
 being explicit about the tradeoff, is a stronger answer than picking one.
@@ -200,7 +213,8 @@ present from.
 - [ ] Both scenarios end to end, live
 - [ ] Scenario 2b (suppression) — needs an open incident, so ordering matters
 - [ ] Scenario 3 (refusal) — the most important beat
-- [ ] Reset procedure verified: `triage-demo reset` between runs
+- [ ] Full run-sheet order back to back with `--keep-incidents` from scenario 3 on
+- [ ] Reset procedure verified: `triage-demo reset` between rehearsals
 - [ ] Inbox-to-first-action latency measured and written down
 - [ ] Re-register Foundry agents; confirm version numbers moved
 - [ ] Screenshot fallbacks captured for every beat
@@ -271,9 +285,60 @@ Not a multiple of the demo. A different category of work.
 **Weeks, not days**, and most of it is not agent work. That is the honest answer,
 and it lands better than a smaller number that turns out to be wrong.
 
+## Review findings
+
+A rubber-duck review was run over the completed Phase 1 build. It raised 14
+blocking and 4 non-blocking issues. Recording them here rather than quietly
+fixing them, because several are worth saying out loud to the customer — they
+are exactly the class of thing that separates a demo from a system.
+
+### Fixed, with regression tests
+
+| Finding | Why it mattered |
+|---|---|
+| Data Quality agent returned `has_issue=True` alongside the model's "looks fine to me" | A self-contradicting sentence would have gone into a Teams message on stage |
+| `flagged_data_quality` was accepted without a flag row ever being written | The agent could report an issue as flagged when nothing was recorded |
+| `duplicate_suppressed` was accepted with no matching open incident | Suppression with nothing to point at, and it created a fake open incident that would then suppress everything after it |
+| A zero-duplicate flag row could be written | Poisons the table someone triages |
+| DQ agent turns and tokens bypassed the ledger entirely | The central "policy covers the run" claim was only true of the orchestrator. A second agent could burn unbounded turns while reported totals stayed small |
+| Scenarios 3 and 4 used exactly 8 of 8 turns | One extra step would have failed the demo with `max_turns_exceeded` for a reason unrelated to the point being made. Limits now cover all agents, with enforced headroom |
+| A resolved incident kept `status=open` and went on suppressing | A fixed issue would silently swallow every recurrence |
+| Live Power BI client polled `$top=1` | Could report a *previous* refresh as this run's success |
+| Teams delivery failures reported success | A run claiming it told a human when it did not |
+| Teams title/action/outcome fields skipped redaction | Redaction was claimed as a boundary property but had holes |
+| Redaction missed Cosmos keys, Basic auth, camelCase JSON secrets, quoted SQL passwords, URL-encoded SAS | All realistic in Power BI / Azure error payloads |
+| `configure_telemetry` had no caller | Tracing was wired in the code and dead in the process |
+| Refused actions were invisible in the tool-call count | The refusal is the interesting part; it should not be the hidden part |
+| Run sheet's own reset order destroyed the evidence it told you to show | Added `--keep-incidents` |
+
+### Documentation corrections
+
+Two of our claims were wrong, and one of the review's corrections was wrong. All
+three were checked against current sources rather than argued from memory.
+
+| Claim | Verdict |
+|---|---|
+| "Use a Teams Incoming Webhook (Channel → Connectors)" | **Wrong.** Office 365 connectors were retired 22 May 2026. Now uses a Power Automate Workflows webhook |
+| "A managed identity cannot be added to a Power BI workspace" | **Wrong.** It can, like any other principal. Corrected, with the SP-vs-MI tradeoff stated |
+| "Graph mail subscriptions renew roughly every 3 days" | **Correct** — the ceiling is 4230 minutes (~2.9 days). The review's "under seven days" was wrong; kept ours, added the exact figure |
+| "Entra secrets expire about a month after go-live" | Overstated — lifetime is configurable and policy-dependent. Softened |
+| "Reproducible byte-for-byte" | Overstated — timestamps and generated ids vary. Now says decisions and evidence are reproducible |
+
+### Accepted as out of scope, with rationale
+
+These are correct criticisms of a *production* system and wrong criticisms of a
+demo. They belong in the production table above, not in Phase 1.
+
+| Finding | Why it is deferred |
+|---|---|
+| Dedup lookup and record are not an atomic claim, so two concurrent identical alerts could both remediate | The demo is single-process and sequential. In production this needs a lease or a unique-constraint claim per signature — it is listed under **Policy** and **Dedup** in the production table |
+| Tier-1 prerequisites (known-incident check, DQ consult, history review) are enforced by the prompt, not the dispatcher | Deliberate: the model classifies, the controller constrains *which actions are permitted*. A misclassification cannot produce an action that was not already allowed. Making the ordering itself deterministic is a reasonable production hardening step and a defensible design conversation to have in the room |
+| No `watch` command consuming a live inbox; `GraphInbox` is unreachable from the CLI | Phase 3 work. Scenarios deliberately load a fixed message so they stay reproducible |
+| Wall-clock is checked between steps, so a hung provider is never interrupted mid-call | Needs a per-await timeout wrapper. Real, and listed under **Failure modes** in the production table |
+| Connected-agent mode is not end-to-end runnable | Documented explicitly rather than fixed — see Phase 4. Requires exposing the scan as a server-callable tool |
+
 ---
 
-## Open questions
 
 | # | Question | Owner | Needed by |
 |---|---|---|---|

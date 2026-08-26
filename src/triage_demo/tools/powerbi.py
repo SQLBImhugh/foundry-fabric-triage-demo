@@ -3,11 +3,12 @@
 Two implementations behind one interface. ``MockPowerBIClient`` is what you
 rehearse against; ``LivePowerBIClient`` is what you demo against.
 
-Auth note for the customer's §7 question: dataset refresh needs a token the
-*dataset* accepts. A service principal works, but only if the tenant admin has
-enabled "Allow service principals to use Power BI APIs" and the SP is a member
-of the workspace. A managed identity cannot be added to a Power BI workspace
-directly today — this is the most common surprise when moving from demo to
+Auth note: dataset refresh needs a token the *dataset* accepts. A service
+principal works; so does a managed identity, which can be added to a Fabric /
+Power BI workspace like any other principal and avoids secret rotation entirely
+when the caller runs in Azure. Either way the tenant setting *"Allow service
+principals to use Power BI APIs"* must be enabled and the principal must be a
+workspace member. That pair is the most common surprise when moving from demo to
 production, so it is stated here rather than discovered on stage.
 """
 
@@ -154,6 +155,16 @@ class LivePowerBIClient:
         base = f"{_API}/groups/{workspace_id}/datasets/{dataset_id}/refreshes"
 
         async with httpx.AsyncClient(timeout=60) as client:
+            # Capture the newest existing refresh id BEFORE triggering, so a
+            # previously-completed run can never be mistaken for this one.
+            # Polling `$top=1` alone will happily return yesterday's success
+            # during the window before the new refresh appears.
+            prior_ids = {
+                r.get("requestId")
+                for r in (await self._history(client, base, headers, 5))
+                if r.get("requestId")
+            }
+
             resp = await client.post(base, headers=headers, json={"notifyOption": "NoNotification"})
             if resp.status_code not in (200, 202):
                 return RefreshOutcome(
@@ -162,22 +173,32 @@ class LivePowerBIClient:
                     detail=f"HTTP {resp.status_code}: {resp.text[:500]}",
                 )
 
-            # 202 Accepted returns no body; poll history for the terminal state.
+            # The 202 carries the new request id in a header on most tenants.
+            # Fall back to "the first id we have not seen before".
+            target_id = resp.headers.get("RequestId") or resp.headers.get("x-ms-request-id") or ""
+
             deadline = time.time() + self._poll_timeout
             while time.time() < deadline:
                 await asyncio.sleep(self._poll_seconds)
-                hist = await client.get(f"{base}?$top=1", headers=headers)
-                hist.raise_for_status()
-                rows = hist.json().get("value", [])
-                if not rows:
+                rows = await self._history(client, base, headers, 10)
+
+                row = None
+                if target_id:
+                    row = next((r for r in rows if r.get("requestId") == target_id), None)
+                else:
+                    row = next(
+                        (r for r in rows if r.get("requestId") not in prior_ids), None
+                    )
+                if row is None:
                     continue
-                status = rows[0].get("status", "Unknown")
+
+                status = row.get("status", "Unknown")
                 if status in ("Completed", "Failed", "Disabled"):
                     return RefreshOutcome(
                         status=status,
-                        request_id=rows[0].get("requestId", ""),
+                        request_id=row.get("requestId", ""),
                         duration_ms=int((time.time() - started) * 1000),
-                        detail=str(rows[0].get("serviceExceptionJson", ""))[:500],
+                        detail=str(row.get("serviceExceptionJson", ""))[:500],
                     )
 
         return RefreshOutcome(
@@ -185,6 +206,12 @@ class LivePowerBIClient:
             duration_ms=int((time.time() - started) * 1000),
             detail=f"Refresh did not reach a terminal state within {self._poll_timeout}s",
         )
+
+    @staticmethod
+    async def _history(client, base: str, headers: dict, top: int) -> list[dict[str, Any]]:
+        resp = await client.get(f"{base}?$top={top}", headers=headers)
+        resp.raise_for_status()
+        return resp.json().get("value", [])
 
     async def get_refresh_history(
         self, workspace_id: str, dataset_id: str, top: int = 5

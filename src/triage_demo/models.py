@@ -182,9 +182,15 @@ class TriageResult(BaseModel):
     llm_turns: int = 0
     tool_calls: int = 0
     write_actions: int = 0
+    attempted_actions: int = 0
     tokens_used: int = 0
     wall_clock_ms: int = 0
     blocked_attempts: list[str] = Field(default_factory=list)
+
+    # A remediation that worked but was never reported is still an operational
+    # failure — the human who needed to know was not told. It does not change
+    # the outcome, but it must not be invisible.
+    notification_failed: bool = False
 
     # Populated only on ``agent_crashed`` — so "why did it crash" is answerable
     # from the incident queue without grepping App Insights.

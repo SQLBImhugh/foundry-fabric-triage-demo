@@ -13,17 +13,31 @@ Verify progress at any point with:
 
 ## 1. Power BI service principal access ← start here
 
-Dataset refresh needs a token the *dataset* accepts. That means a service
-principal, and two separate approvals.
+Dataset refresh needs a token the *dataset* accepts. Two identity options, and
+the choice is not obvious:
 
-**A managed identity cannot be added to a Power BI workspace today.** MI is not
-an option for this specific call. Do not design around one.
+| | Service principal | Managed identity |
+|---|---|---|
+| Callable from | Anywhere | Azure-hosted compute only |
+| Secret handling | You rotate it, and it expires | Platform-managed, no secret |
+| Workspace membership | Supported | Also supported — add it like any other principal |
+
+A managed identity **can** be added to a Fabric/Power BI workspace via *Manage
+access → Add people or groups*. If your orchestrator runs in Azure (Functions,
+Container Apps, Automation), prefer it — there is no secret to rotate. Use a
+service principal when the caller is outside Azure, which is the case for a demo
+driven from a laptop.
+
+Note also that Fabric removed the default Contributor grant for workspace
+identities in 2025; assign the role explicitly rather than assuming it.
+
+Either way, two approvals are needed.
 
 ### Tenant setting (tenant admin)
 
 Power BI admin portal → Tenant settings → Developer settings →
 **Allow service principals to use Power BI APIs** → Enabled, scoped to a
-security group containing the SP.
+security group containing the principal.
 
 This is the item that has blocked more demos than everything else combined. It is
 a tenant admin action, and until it is on, refresh returns 401 with a message
@@ -31,8 +45,8 @@ that does not mention it.
 
 ### Workspace membership
 
-Add the SP to the workspace as **Member** (Contributor cannot trigger refresh on
-all dataset types; Member avoids the ambiguity).
+Add the principal to the workspace as **Member** (Contributor cannot trigger
+refresh on all dataset types; Member avoids the ambiguity).
 
 ### Verify
 
@@ -130,14 +144,31 @@ Seed the model from `mock/data/well_production.csv` (with duplicates) or
 
 ## 6. Teams channel + notification path
 
-**Demo path** — incoming webhook. Channel → Connectors → Incoming Webhook. Copy
-the URL to `TEAMS_WEBHOOK_URL`.
+> **Do not use "Channel → Connectors → Incoming Webhook".** Office 365
+> connectors, including Teams Incoming Webhooks, were **retired on 22 May 2026**
+> and no longer deliver. Any guide that still describes that flow predates the
+> retirement.
 
-Treat the URL as a secret: anyone holding it can post to the channel. It is fine
-for a demo tenant; say so out loud rather than letting someone assume otherwise.
+**Demo path — Power Automate Workflows webhook.** In the channel: **⋯ →
+Workflows → "Post to a channel when a webhook request is received"**. Complete
+the template and copy the generated HTTP POST URL into `TEAMS_WEBHOOK_URL`.
 
-**Production path** — Graph `/teams/{id}/channels/{id}/messages` with an app
-registration, so posts are attributable to an identity.
+The payload shape is unchanged — `WorkflowsWebhookTeamsNotifier` posts the same
+Adaptive Card envelope — so only the URL source moved. Two differences worth
+mentioning before someone notices on screen:
+
+- posts appear as the **Workflows bot**; custom name and icon are not carried over
+- interactive MessageCard buttons are not supported; use Adaptive Card actions
+
+Treat the URL as a secret: anyone holding it can post to the channel. That is
+acceptable in a demo tenant — say so out loud rather than letting someone assume
+otherwise.
+
+**Production path** — post via Graph with an app registration so messages are
+attributable to an identity. Note that app-only posting to channel messages is
+restricted (it is gated behind protected APIs / migration scenarios), so most
+production designs use a bot or a delegated flow rather than raw app-only Graph.
+Confirm the path against current docs before committing to it.
 
 ---
 

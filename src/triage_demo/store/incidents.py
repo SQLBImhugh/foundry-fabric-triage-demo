@@ -58,6 +58,24 @@ def _utcnow() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _status_for(outcome: str) -> str:
+    """Status is derived from the outcome, never set independently.
+
+    Keeping these in sync matters: an incident left ``open`` after it was
+    resolved keeps suppressing new alerts forever, so a real recurrence is
+    silently swallowed.
+    """
+    return "resolved" if outcome == "resolved" else "open"
+
+
+def _needs_investigation(result: TriageResult) -> bool:
+    return (
+        result.outcome in _INVESTIGATE_OUTCOMES
+        or bool(result.blocked_attempts)
+        or bool(getattr(result, "notification_failed", False))
+    )
+
+
 class IncidentStore(Protocol):
     def find_open(self, signature: str) -> Incident | None: ...
     def record(self, result: TriageResult, **provenance) -> Incident: ...
@@ -142,9 +160,11 @@ class InMemoryIncidentStore:
                     return parent.model_copy(deep=True)
             logger.warning(
                 "Result reported duplicate_suppressed but no open incident matched "
-                "signature %s — recording it as a new row",
+                "signature %s — recording it as needs_human instead of creating an "
+                "orphan open incident that would suppress future alerts",
                 result.signature,
             )
+            result = result.model_copy(update={"outcome": "needs_human"})
 
         resolved = result.outcome in ("resolved", "flagged_data_quality")
         iid = incident_id(result.signature, resolved=resolved)
@@ -160,8 +180,13 @@ class InMemoryIncidentStore:
                 existing.occurrence_count += 1
                 existing.last_seen_at = now
                 existing.outcome = result.outcome
+                # Status must follow the outcome, or a since-resolved incident
+                # keeps suppressing under a stale 'open'.
+                existing.status = _status_for(result.outcome)  # type: ignore[assignment]
                 if red_cause:
                     existing.diagnosed_root_cause = red_cause
+                if _needs_investigation(result):
+                    existing.requires_investigation = True
                 self._persist(existing)
                 logger.info(
                     "Incident %s occurrence -> %d", iid, existing.occurrence_count
@@ -173,7 +198,7 @@ class InMemoryIncidentStore:
                 signature=result.signature,
                 signature_version=result.signature_version,
                 outcome=result.outcome,
-                status="resolved" if result.outcome == "resolved" else "open",
+                status=_status_for(result.outcome),  # type: ignore[arg-type]
                 request_id=result.request_id,
                 report_name=report_name,
                 source=source,
@@ -184,9 +209,7 @@ class InMemoryIncidentStore:
                 diagnosed_root_cause=red_cause,
                 action_applied=red_action,
                 action_type=_ACTION_TYPES.get(result.action_taken, "unknown"),  # type: ignore[arg-type]
-                requires_investigation=(
-                    result.outcome in _INVESTIGATE_OUTCOMES or bool(result.blocked_attempts)
-                ),
+                requires_investigation=_needs_investigation(result),
                 agent_name=agent_name,
                 prompt_version_hash=prompt_version_hash,
                 model_provider=model_provider,

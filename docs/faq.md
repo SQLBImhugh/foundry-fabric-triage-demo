@@ -13,9 +13,12 @@ Two shapes, both registered by `scripts/register_foundry_agents.py`.
 to the Triage agent as a tool in the Foundry control plane; Foundry performs the
 handoff server-side. Least code, cleanest trace.
 
-**Client-orchestrated** (`--handoff client`, what the demo runs). The Triage
-agent declares `consult_data_quality_agent` as an ordinary function tool. Our
-process performs the handoff.
+**Be precise about what you're showing here.** We register connected mode to
+show the shape and the trace, but the demo does not *run* it, for a concrete
+reason: Foundry executes a connected agent server-side, so that agent's tools
+must be server-callable. Our Data Quality agent's only tool is a local CSV scan
+in the calling process. Making connected mode real means exposing that scan as
+an OpenAPI or Azure Function tool first.
 
 The tradeoff is the interesting part:
 
@@ -68,13 +71,14 @@ Two mechanisms, both producing the same `BIRequest`:
 | | Poll | Graph change notification |
 |---|---|---|
 | Mechanism | Timer reads the mailbox every N seconds | Graph POSTs to a public HTTPS endpoint |
-| Latency | Half the interval on average (~15s at 30s) | Seconds |
+| Latency | Half the interval on average (~15s at 30s) | Seconds to ~1 minute typical |
 | Needs | Nothing | A reachable validation endpoint |
-| Lifecycle | None | Renewal roughly every 3 days for mail |
+| Lifecycle | None | Renewal before expiry — max **4230 minutes (~2.9 days)** for mail |
 | Failure mode | Late | **Silent** — a lapsed renewal stops delivery with no error |
 
 The demo polls. Production is event-driven, and the renewal has to be monitored,
-because the failure mode is silence rather than an error.
+because the failure mode is silence rather than an error. Most teams renew at
+least daily rather than waiting for the ~3-day ceiling.
 
 Measure the real number during rehearsal and quote it rather than estimating.
 
@@ -82,29 +86,34 @@ Measure the real number during rehearsal and quote it rather than estimating.
 
 ## 4. Auth model for Power BI REST and Teams
 
-**Power BI.** Dataset refresh needs a token the *dataset* accepts. That means a
-service principal, and two things that are easy to miss:
+**Power BI.** Dataset refresh needs a token the *dataset* accepts. Two things
+that are easy to miss:
 
 1. The tenant setting *"Allow service principals to use Power BI APIs"* must be
-   on. It is a tenant admin action.
-2. The SP must be a member of the workspace.
+   on. It is a tenant admin action, and until it is, refresh returns a 401 whose
+   message does not mention it.
+2. The principal must be a member of the workspace.
 
-A managed identity cannot be added to a Power BI workspace today, so MI is not
-an option for this call specifically. It is the most common surprise in moving
-this from demo to production — flag it rather than discovering it live.
+A **managed identity can** be added to a Fabric/Power BI workspace, so if the
+orchestrator runs in Azure, prefer MI and skip secret rotation entirely. A
+service principal is the right choice when the caller is outside Azure — which
+is why the demo uses one.
 
-**Teams.** Incoming webhook for the demo (an unauthenticated URL, treated as a
-secret). Production: Graph `/chats/{id}/messages` or `/teams/{id}/channels/{id}/messages`
-with an app registration, so the message is attributable to an identity.
+**Teams.** The old Office 365 connector "Incoming Webhook" was **retired on
+22 May 2026**; the demo uses a **Power Automate Workflows webhook**, which takes
+the same Adaptive Card payload. Posts appear as the Workflows bot rather than a
+custom identity. Production designs generally use a bot or delegated Graph flow,
+because app-only posting to channel messages is restricted.
 
 **Azure control plane.** `DefaultAzureCredential` throughout — managed identity in
 Azure, developer credentials locally. No API keys anywhere.
 
 The durable point:
 
-> Entra app secrets expire. Any design that depends on a long-lived client secret
-> fails roughly a month after go-live, usually at 2am. Plan the rotation — or use
-> federated credentials — at design time.
+> Entra app secrets expire — the lifetime is configurable, and tenant policy
+> often caps it well below the old two-year default. Any design that depends on a
+> long-lived client secret eventually fails at 2am. Plan the rotation, or use
+> federated credentials, at design time rather than after the first outage.
 
 ---
 

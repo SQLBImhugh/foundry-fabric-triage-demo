@@ -276,6 +276,12 @@ class TriageAgent:
             summary = str(reported.get("summary") or "")
             outcome, summary = self._validate_outcome(outcome, summary, ctx, ledger)
 
+        notification_failed = ctx.notification_attempted and not ctx.notification_delivered
+        if notification_failed:
+            logger.warning("Notification was attempted but not delivered")
+            self._emit("notification_failed", {})
+            summary = (summary + " WARNING: the resolution summary was not delivered.").strip()
+
         return TriageResult(
             outcome=outcome,  # type: ignore[arg-type]
             summary=summary,
@@ -288,10 +294,12 @@ class TriageAgent:
             actions=dispatcher.actions,
             llm_turns=ledger.llm_turns,
             tool_calls=ledger.tool_calls,
+            attempted_actions=ledger.attempted_actions,
             write_actions=ledger.write_actions,
             tokens_used=ledger.tokens_used,
             wall_clock_ms=ledger.elapsed_ms,
             blocked_attempts=list(ledger.blocked_attempts),
+            notification_failed=notification_failed,
             exception_class=exception_class,
             exception_message=exception_message,
             started_at=started_at,
@@ -305,42 +313,53 @@ class TriageAgent:
         ctx: ToolContext,
         ledger: PolicyLedger,
     ) -> tuple[str, str]:
-        """Refuse to record success the evidence does not support."""
+        """Refuse to record success the evidence does not support.
+
+        Each check compares the agent's claim against something that actually
+        happened, never against another thing the agent said.
+        """
         if outcome == "resolved":
             remediation = ctx.remediation_outcome
             if remediation is None or not getattr(remediation, "succeeded", False):
-                logger.warning(
-                    "Model reported 'resolved' but no remediation succeeded — downgrading"
-                )
-                self._emit("outcome_downgraded", {"from": "resolved", "to": "needs_human"})
-                return (
-                    "needs_human",
-                    (
-                        "Agent reported success, but no remediation completed successfully. "
-                        "Downgraded by the controller and escalated. "
-                        + (summary or "")
-                    ).strip(),
+                return self._downgrade(
+                    "resolved",
+                    summary,
+                    "Agent reported success, but no remediation completed successfully.",
                 )
 
         if outcome == "flagged_data_quality":
             finding = ctx.dq_finding
             if finding is None or not finding.has_issue:
-                logger.warning(
-                    "Model reported 'flagged_data_quality' without a positive finding — downgrading"
+                return self._downgrade(
+                    "flagged_data_quality",
+                    summary,
+                    "Agent reported a data quality issue that the deterministic scan "
+                    "did not find.",
                 )
-                self._emit("outcome_downgraded", {"from": "flagged_data_quality", "to": "needs_human"})
-                return (
-                    "needs_human",
-                    (
-                        "Agent reported a data quality issue that the deterministic scan did "
-                        "not find. Downgraded by the controller. " + (summary or "")
-                    ).strip(),
+            if not ctx.flag_written:
+                return self._downgrade(
+                    "flagged_data_quality",
+                    summary,
+                    "Agent reported the issue as flagged, but no flag row was written.",
                 )
+
+        if outcome == "duplicate_suppressed" and ctx.known_incident is None:
+            return self._downgrade(
+                "duplicate_suppressed",
+                summary,
+                "Agent suppressed the alert as a duplicate, but no open incident "
+                "matched its signature.",
+            )
 
         if ledger.blocked_attempts and outcome in ("resolved", "flagged_data_quality"):
             logger.info("Run contained blocked attempts: %s", ledger.blocked_attempts)
 
         return outcome, summary
+
+    def _downgrade(self, from_outcome: str, summary: str, reason: str) -> tuple[str, str]:
+        logger.warning("Downgrading '%s': %s", from_outcome, reason)
+        self._emit("outcome_downgraded", {"from": from_outcome, "to": "needs_human", "reason": reason})
+        return "needs_human", f"{reason} Downgraded by the controller. {summary or ''}".strip()
 
     def _initial_message(self, request: BIRequest, deps: TriageDeps) -> str:
         lines = [

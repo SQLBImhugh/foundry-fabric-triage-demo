@@ -19,6 +19,22 @@ LEAKY_INPUTS = [
     ("aws_access_key", "aws key AKIAIOSFODNN7EXAMPLE in the log"),
     ("github_token", "token ghp_1234567890abcdefghijklmnopqrstuvwx"),
     ("generic_secret_kv", 'client_secret="abc123def456ghi789jkl"'),
+    # --- added after review: realistic Power BI / Azure error payloads -----
+    (
+        "cosmos_key",
+        "AccountEndpoint=https://x.documents.azure.com:443/;Key="
+        + "A" * 86
+        + "==;",
+    ),
+    ("basic_auth", "Authorization: Basic YWRtaW46aHVudGVyMnBhc3N3b3Jk"),
+    ("generic_secret_kv", '{"clientSecret": "abc123def456ghi789jkl"}'),
+    ("generic_secret_kv", '{"accessToken":"eyJabc123def456ghi789"}'),
+    ("sql_conn", 'Server=tcp:x.database.windows.net;Password="Hunter2Hunter2";'),
+    ("sql_conn", "Server=tcp:x.database.windows.net;Pwd='S3cr3tValue';"),
+    (
+        "azure_sas",
+        "https://acct.blob.core.windows.net/c/b?sv=2021&sig=AbCdEf0123456789%2Fabc%3D",
+    ),
 ]
 
 
@@ -71,3 +87,18 @@ def test_multiple_secrets_all_fire() -> None:
     text = "Bearer abcdefghijklmnopqrstuvwxyz0123456789 and AKIAIOSFODNN7EXAMPLE"
     _, fired = redact(text)
     assert {"bearer_token", "aws_access_key"} <= set(fired)
+
+
+def test_redaction_does_not_destroy_the_surrounding_error() -> None:
+    """Over-redaction is its own failure: an unreadable error helps nobody."""
+    text = (
+        "RefreshError: the gateway rejected the credential for "
+        "Server=tcp:x.database.windows.net;Password=Hunter2Hunter2; "
+        "while loading table well_production at 2026-08-26T05:00:04Z"
+    )
+    redacted, fired = redact(text)
+
+    assert "sql_conn" in fired
+    assert "Hunter2Hunter2" not in redacted
+    for preserved in ("RefreshError", "well_production", "x.database.windows.net"):
+        assert preserved in redacted, f"redaction destroyed '{preserved}'"

@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     foundry_project_endpoint: str = ""
     foundry_triage_agent_name: str = "bi-triage"
     foundry_dq_agent_name: str = "bi-data-quality"
+    # Which agent-to-agent handoff shape the runtime uses. See
+    # docs/architecture.md - `connected` requires the Data Quality agent's tools
+    # to be server-callable, which the demo's local CSV scan is not.
+    foundry_handoff_mode: Literal["client", "connected"] = "client"
 
     # --- Azure OpenAI (direct mode) ---------------------------------------
     azure_openai_endpoint: str = ""
@@ -60,8 +64,9 @@ class Settings(BaseSettings):
     applicationinsights_connection_string: str = Field(default="", repr=False)
 
     # --- Policy ------------------------------------------------------------
-    triage_max_llm_turns: int = 8
-    triage_max_tool_calls: int = 15
+    # Shared across every agent in a run, not per agent. See TriagePolicy.
+    triage_max_llm_turns: int = 14
+    triage_max_tool_calls: int = 20
     triage_max_write_actions: int = 1
     triage_max_tokens: int = 80_000
     triage_timeout_seconds: int = 300

@@ -31,12 +31,12 @@ class ResolutionSummary:
 
     def to_markdown(self) -> str:
         lines = [
-            f"**{self.title}**",
+            f"**{redact_text(self.title)}**",
             "",
-            f"- **Report**: {self.report_name or 'n/a'}",
+            f"- **Report**: {redact_text(self.report_name) or 'n/a'}",
             f"- **Error**: {redact_text(self.error) or 'n/a'}",
-            f"- **Action taken**: {self.action_taken or 'none'}",
-            f"- **Outcome**: {self.outcome}",
+            f"- **Action taken**: {redact_text(self.action_taken) or 'none'}",
+            f"- **Outcome**: {redact_text(self.outcome)}",
             f"- **Timestamp**: {self.timestamp}",
         ]
         for key, value in self.facts.items():
@@ -47,15 +47,20 @@ class ResolutionSummary:
 
     def to_adaptive_card(self) -> dict[str, Any]:
         facts = [
-            {"title": "Report", "value": self.report_name or "n/a"},
+            {"title": "Report", "value": redact_text(self.report_name) or "n/a"},
             {"title": "Error", "value": redact_text(self.error)[:300] or "n/a"},
-            {"title": "Action taken", "value": self.action_taken or "none"},
-            {"title": "Outcome", "value": self.outcome},
+            {"title": "Action taken", "value": redact_text(self.action_taken) or "none"},
+            {"title": "Outcome", "value": redact_text(self.outcome)},
             {"title": "Timestamp", "value": self.timestamp},
         ] + [{"title": k, "value": redact_text(str(v))[:300]} for k, v in self.facts.items()]
 
         body: list[dict[str, Any]] = [
-            {"type": "TextBlock", "size": "Medium", "weight": "Bolder", "text": self.title},
+            {
+                "type": "TextBlock",
+                "size": "Medium",
+                "weight": "Bolder",
+                "text": redact_text(self.title),
+            },
             {"type": "FactSet", "facts": facts},
         ]
         if self.detail:
@@ -99,12 +104,26 @@ class MockTeamsNotifier:
         return self.messages[-1] if self.messages else None
 
 
-class WebhookTeamsNotifier:
-    """Posts an Adaptive Card to an incoming webhook.
+class WorkflowsWebhookTeamsNotifier:
+    """Posts an Adaptive Card to a Power Automate **Workflows** webhook.
 
-    Lowest-friction path for a demo. For production, post via Graph
-    ``/chats/{id}/messages`` with an app registration so the message is
-    attributable to an identity rather than an unauthenticated URL.
+    Not the old Office 365 connector "Incoming Webhook" — those were retired on
+    **22 May 2026** and no longer deliver. If you find a demo guide that says
+    "Channel -> Connectors -> Incoming Webhook", it predates the retirement.
+
+    The replacement is a Power Automate Workflows webhook, created from the
+    channel via *Workflows -> Post to a channel when a webhook request is
+    received*. The payload shape below is unchanged, which is why this class
+    did not need rewriting — only the URL source did.
+
+    Two known behavioural differences worth stating before someone notices on
+    screen: posts appear as the Workflows bot rather than a custom name/icon,
+    and interactive MessageCard buttons are not carried over (use Adaptive Card
+    actions instead).
+
+    Production alternative: post via Graph with an app registration so the
+    message is attributable to an identity rather than to a URL that anyone
+    holding it can post to.
     """
 
     def __init__(self, webhook_url: str, timeout: int = 20):
@@ -114,14 +133,35 @@ class WebhookTeamsNotifier:
     async def post(self, summary: ResolutionSummary) -> dict[str, Any]:
         import httpx
 
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.post(self._url, json=summary.to_adaptive_card())
-            ok = 200 <= resp.status_code < 300
-            if not ok:
-                logger.warning("Teams webhook returned %s: %s", resp.status_code, resp.text[:200])
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                resp = await client.post(self._url, json=summary.to_adaptive_card())
+        except httpx.HTTPError as exc:
+            # A notification failure must be reported as a failure. Swallowing
+            # it produces a run that claims it told a human when it did not.
+            logger.warning("Teams post failed: %s", type(exc).__name__)
             return {
-                "status": "ok" if ok else "error",
-                "delivered": ok,
-                "http_status": resp.status_code,
-                "transport": "webhook",
+                "status": "error",
+                "delivered": False,
+                "error_type": type(exc).__name__,
+                "transport": "workflows_webhook",
             }
+
+        ok = 200 <= resp.status_code < 300
+        if not ok:
+            logger.warning("Teams webhook returned %s: %s", resp.status_code, resp.text[:200])
+            if resp.status_code in (404, 410):
+                logger.warning(
+                    "404/410 from a Teams webhook usually means a retired Office 365 "
+                    "connector URL. Recreate it as a Power Automate Workflows webhook."
+                )
+        return {
+            "status": "ok" if ok else "error",
+            "delivered": ok,
+            "http_status": resp.status_code,
+            "transport": "workflows_webhook",
+        }
+
+
+# Back-compat alias. The transport changed; the interface did not.
+WebhookTeamsNotifier = WorkflowsWebhookTeamsNotifier

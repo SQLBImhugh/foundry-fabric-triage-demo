@@ -24,6 +24,7 @@ from rich.rule import Rule
 from rich.syntax import Syntax
 from rich.table import Table
 
+from triage_demo.observability import configure_telemetry
 from triage_demo.runner import (
     RunArtifacts,
     Scenario,
@@ -147,7 +148,11 @@ def _render_result(artifacts: RunArtifacts) -> None:
     budget.add_column("Metric")
     budget.add_column("Used", justify="right")
     budget.add_row("LLM turns", str(result.llm_turns))
-    budget.add_row("Tool calls", str(result.tool_calls))
+    budget.add_row("Tool calls dispatched", str(result.tool_calls))
+    if result.attempted_actions != result.tool_calls:
+        budget.add_row(
+            "[red]Actions attempted[/red]", f"[red]{result.attempted_actions}[/red]"
+        )
     budget.add_row("Remediation writes", str(result.write_actions))
     budget.add_row("Tokens", f"{result.tokens_used:,}")
     budget.add_row("Wall clock", f"{result.wall_clock_ms} ms")
@@ -256,7 +261,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             )
         )
 
-    all_artifacts = asyncio.run(runner.run_scenario(scenario))
+    all_artifacts = asyncio.run(runner.run_scenario(scenario, keep_incidents=args.keep_incidents))
 
     for idx, artifacts in enumerate(all_artifacts, start=1):
         if len(all_artifacts) > 1:
@@ -416,6 +421,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("scenario")
     run.add_argument("--verbose", "-v", action="store_true", help="Show agent reasoning")
     run.add_argument("--show-data", action="store_true", help="Show source + flag tables")
+    run.add_argument(
+        "--keep-incidents",
+        action="store_true",
+        help="Do not clear the incident store first (keeps prior runs' evidence visible)",
+    )
     run.set_defaults(func=cmd_run)
 
     sub.add_parser("flags", help="Show the data quality flag table").set_defaults(func=cmd_flags)
@@ -444,6 +454,12 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.debug else logging.ERROR,
         format="%(levelname)s %(name)s %(message)s",
     )
+
+    # Without this call the connection string is read and never used, so
+    # "tracing is wired up" would be true of the code and false of the process.
+    if settings.applicationinsights_connection_string:
+        configure_telemetry(settings.applicationinsights_connection_string)
+
     return int(args.func(args))
 
 

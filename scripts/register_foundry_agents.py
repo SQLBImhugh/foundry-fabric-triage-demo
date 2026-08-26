@@ -25,8 +25,18 @@ Handoff shapes
 ``--handoff connected``
     The Data Quality agent is attached to the Triage agent as a connected
     agent, and Foundry performs the handoff server-side. Fewer moving parts,
-    a very legible trace — and no place to put a budget. Register it, show the
-    trace, and be explicit about the tradeoff.
+    a very legible trace — and no place to put a budget.
+
+    **This mode is not end-to-end runnable as registered here**, and the demo
+    does not run it. Foundry executes a connected agent server-side, so that
+    agent's tools must also be server-callable. The Data Quality agent's only
+    tool is ``check_duplicates``, a local CSV scan running in this process —
+    Foundry cannot invoke it. To make connected mode real you would expose the
+    scan as an OpenAPI or Azure Function tool first.
+
+    Register it to show the shape and the trace, and be explicit about both the
+    tooling requirement and the fact that the ledger no longer sits in the
+    middle. Do not claim it is the running configuration.
 
 Usage
 -----
@@ -213,9 +223,15 @@ def main(argv: list[str] | None = None) -> int:
     print(f"\nHandoff mode registered: {args.handoff}")
     if args.handoff == "connected":
         print(
-            "NOTE: in connected mode the handoff happens inside Foundry, so the local\n"
-            "      PolicyLedger no longer sits between the two agents. Budgets and the\n"
-            "      action allowlist become agent instructions rather than enforced code."
+            "\nWARNING: connected mode is registered, but NOT end-to-end runnable as-is.\n"
+            "  Foundry executes a connected agent server-side, so that agent's tools must\n"
+            "  be server-callable. The Data Quality agent's only tool (check_duplicates)\n"
+            "  is a local scan in the calling process, which Foundry cannot invoke.\n"
+            "  Expose it as an OpenAPI or Azure Function tool to make this mode real.\n"
+            "\n"
+            "  Also note: in connected mode the local PolicyLedger no longer sits between\n"
+            "  the two agents, so budgets and the action allowlist become agent\n"
+            "  instructions rather than enforced code. Show the shape; ship client mode."
         )
     return 0
 

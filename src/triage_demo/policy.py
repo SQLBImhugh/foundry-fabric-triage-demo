@@ -74,10 +74,18 @@ class PolicyViolation(Exception):
 
 @dataclass(frozen=True)
 class TriagePolicy:
-    """Hard limits enforced by the controller loop."""
+    """Hard limits enforced by the controller loop.
 
-    max_llm_turns: int = 8
-    max_tool_calls: int = 15
+    ``max_llm_turns`` covers **every agent in the run**, not just the
+    orchestrator — the ledger is shared with the Data Quality agent. The
+    observed worst case today is 10 turns (8 orchestrator + 2 data quality),
+    so 14 leaves deliberate headroom. A limit tuned so tightly that the normal
+    path nearly trips it stops being a safety control and becomes a source of
+    spurious failures that mask the real ones.
+    """
+
+    max_llm_turns: int = 14
+    max_tool_calls: int = 20
     max_write_actions: int = 1
     max_tokens: int = 80_000
     wall_clock_timeout_seconds: int = 300
@@ -116,6 +124,7 @@ class PolicyLedger:
         self._started_at = clock()
         self.llm_turns = 0
         self.tool_calls = 0
+        self.attempted_actions = 0
         self.write_actions = 0
         self.tokens_used = 0
         self.blocked_attempts: list[str] = []
@@ -134,6 +143,7 @@ class PolicyLedger:
         return {
             "llm_turns": self.llm_turns,
             "tool_calls": self.tool_calls,
+            "attempted_actions": self.attempted_actions,
             "write_actions": self.write_actions,
             "tokens_used": self.tokens_used,
             "elapsed_ms": self.elapsed_ms,
@@ -178,6 +188,10 @@ class PolicyLedger:
             )
 
     def charge_tool_call(self, action: str) -> None:
+        # Attempts are counted before any check, so "the agent asked for 8
+        # things and 7 were dispatched" is answerable. Counting only what was
+        # dispatched hides the refusals, which are the interesting part.
+        self.attempted_actions += 1
         self.check_deadline()
         self.assert_action_allowed(action)
 

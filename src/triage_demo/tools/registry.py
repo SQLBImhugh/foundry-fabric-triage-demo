@@ -246,6 +246,9 @@ class ToolContext:
     remediation_outcome: Any = None
     resolution: dict[str, Any] | None = None
     notifications: list[ResolutionSummary] = field(default_factory=list)
+    flag_written: bool = False
+    notification_attempted: bool = False
+    notification_delivered: bool = False
 
     workspace_id: str = ""
     dataset_id: str = ""
@@ -348,6 +351,7 @@ class ToolDispatcher:
                 request=ctx.request,
                 datasets=ctx.datasets,
                 reason=str(args.get("reason", "")),
+                ledger=ctx.ledger,
             )
             ctx.dq_finding = finding
             return finding.model_dump()
@@ -373,12 +377,23 @@ class ToolDispatcher:
                         "Data Quality agent before writing a flag."
                     ),
                 }
+            # A flag row asserting zero duplicates is worse than no row: someone
+            # triages it, finds nothing, and stops trusting the table.
+            if not finding.has_issue or finding.evidence.duplicate_row_count <= 0:
+                return {
+                    "status": "refused",
+                    "reason": (
+                        f"The scan found no duplicates in {finding.evidence.table}. "
+                        "There is nothing to flag."
+                    ),
+                }
             flag = build_flag(
                 request_id=ctx.request.request_id,
                 evidence=finding.evidence,
                 detail=str(args.get("detail") or finding.detail)[:1000],
             )
             ctx.flag_table.append(flag)
+            ctx.flag_written = True
             return {"status": "written", "flag": flag.model_dump()}
 
         if name == "notify_teams":
@@ -393,7 +408,12 @@ class ToolDispatcher:
                 facts=_facts_for(ctx),
             )
             ctx.notifications.append(summary)
-            return await ctx.teams.post(summary)
+            ctx.notification_attempted = True
+            delivery = await ctx.teams.post(summary)
+            ctx.notification_delivered = bool(
+                delivery.get("delivered") if isinstance(delivery, dict) else False
+            )
+            return delivery
 
         if name == "report_resolution":
             ctx.resolution = dict(args)

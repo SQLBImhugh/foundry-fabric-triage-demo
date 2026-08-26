@@ -111,6 +111,9 @@ And:
 .\.venv\Scripts\triage-demo.exe incidents
 ```
 
+Note: 2b deliberately runs **without** `--keep-incidents` — it needs a clean
+store so run 1 opens the incident that run 2 then matches.
+
 | When you see | Say |
 |---|---|
 | Run 1 | "Flagged, as before." |
@@ -129,8 +132,12 @@ And:
 > Everything so far assumed the agent behaves. Here it doesn't.
 
 ```powershell
-.\.venv\Scripts\triage-demo.exe run scenario3-policy-block
+.\.venv\Scripts\triage-demo.exe run scenario3-policy-block --keep-incidents
 ```
+
+From here on, pass `--keep-incidents` so the queue you show in section 6 still
+contains this run. Each scenario uses a distinct failure signature, so they
+accumulate rather than suppressing one another.
 
 | When you see | Say |
 |---|---|
@@ -138,6 +145,7 @@ And:
 | **REFUSED BY CONTROLLER** panel | "It asked for a second one. That limit is a Python integer, not a sentence in a prompt. No wording change raises it." |
 | `notify_teams` after the refusal | "And note it still reported. The refusal is returned to the agent as data, so it can escalate rather than go silent." |
 | Outcome `needs_human` | "Not a false success. It escalated." |
+| Actions attempted vs dispatched | "Eight asked for, seven dispatched. The gap is the refusal." |
 | Blocked attempts row | "Recorded on the incident, flagged for investigation." |
 
 > The alternative is the one everybody has heard about: an agent that retries a
@@ -148,7 +156,7 @@ And:
 ## 5. Scenario 4 — outside the allowlist (3 min)
 
 ```powershell
-.\.venv\Scripts\triage-demo.exe run scenario4-unknown-action
+.\.venv\Scripts\triage-demo.exe run scenario4-unknown-action --keep-incidents
 ```
 
 > Here it proposes deleting the dataset.
@@ -216,5 +224,6 @@ Offer: this repo, the agent definitions, the prompts, the tool schemas, the
 | Foundry call fails | `TRIAGE_PROVIDER_MODE=mock`. Narrative is unchanged |
 | Teams post fails | `TEAMS_MODE` unset → mock notifier renders the card in the terminal |
 | Suppression doesn't fire | An earlier run left no *open* incident. `triage-demo reset`, re-run scenario 2b whole |
+| Incident queue looks empty in section 6 | A later `run` cleared it. Re-run scenario 3, then use `--keep-incidents` on anything after it |
 | Agent behaves oddly in Foundry mode | Almost certainly a stale registration. `register_foundry_agents.py --dry-run` |
 | Everything is on fire | Both modes to `mock`. Every scenario still runs, offline, in seconds |

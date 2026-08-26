@@ -6,9 +6,11 @@ Two mechanisms, because the customer explicitly asked to see the difference:
   endpoint, no subscription lifecycle. Latency = half the poll interval on
   average. This is what the demo uses.
 * **subscription** — Graph change notifications POST to a public HTTPS
-  endpoint within seconds. Requires a reachable validation endpoint and
-  renewal roughly every 3 days for mail resources; a lapsed renewal is a
-  silent outage, which is the reason to know about it before production.
+  endpoint, typically within seconds. Requires a reachable validation endpoint
+  and renewal before expiry — the ceiling for mail resources is 4230 minutes
+  (just under 3 days), and most teams renew at least daily rather than riding
+  the limit. A lapsed renewal is a silent outage, which is the reason to know
+  about it before production.
 
 Both produce the same :class:`BIRequest`, so the agent code never knows which
 one is wired up.
