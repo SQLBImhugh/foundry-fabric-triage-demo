@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from triage_demo.approvals import ApprovalGate, ApprovalRequest
+from triage_demo.knowledge.refresh_history import assess_deactivation_risk
 from triage_demo.models import ApprovalRecord, BIRequest, DataQualityFinding, TriageAction
 from triage_demo.observability import tool_span
 from triage_demo.policy import (
@@ -71,8 +72,11 @@ TRIAGE_TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "get_dataset_refresh_history",
             "description": (
-                "Return the last N refresh attempts for the dataset. Use this to "
-                "distinguish a one-off transient failure from a repeating one."
+                "Return the last N refresh attempts for the dataset, plus a "
+                "deterministic assessment of how close the refresh SCHEDULE is to being "
+                "deactivated. Use this to distinguish a one-off transient failure from a "
+                "repeating one. Note that only scheduled runs count toward deactivation — "
+                "your own API-triggered retries do not."
             ),
             "parameters": {
                 "type": "object",
@@ -292,6 +296,7 @@ class ToolContext:
     approval_gate: ApprovalGate | None = None
     approvals: list[ApprovalRecord] = field(default_factory=list)
     gateway_rebound_to: str = ""
+    deactivation_risk: Any = None
 
     def default_dataset(self) -> DatasetSource | None:
         return next(iter(self.datasets.values()), None)
@@ -501,7 +506,18 @@ class ToolDispatcher:
             history = await ctx.powerbi.get_refresh_history(
                 ctx.workspace_id, ctx.dataset_id, top=top
             )
-            return {"count": len(history), "history": history}
+            # Counting consecutive SCHEDULED failures is an exact question, so
+            # it is answered here rather than left to the model. API-triggered
+            # refreshes - including this agent's own retries - are a different
+            # trigger path and must not be counted.
+            risk = assess_deactivation_risk(history)
+            ctx.deactivation_risk = risk
+            return {
+                "status": "ok",
+                "count": len(history),
+                "history": history,
+                "schedule_deactivation_risk": risk.as_evidence(),
+            }
 
         if name == "consult_data_quality_agent":
             if self._dq_agent is None:
@@ -650,6 +666,9 @@ def _summarize(result: Any) -> str:
     if isinstance(result, dict):
         keys = ("status", "succeeded", "known_related_issue", "has_issue", "count")
         parts = [f"{k}={result[k]}" for k in keys if k in result]
+        risk = result.get("schedule_deactivation_risk")
+        if isinstance(risk, dict) and risk.get("schedule_at_risk"):
+            parts.append("SCHEDULE AT RISK")
         if parts:
             return ", ".join(parts)
     return str(result)[:300]

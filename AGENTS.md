@@ -16,7 +16,7 @@ It runs fully offline. Keep it that way.
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 
-.\.venv\Scripts\python.exe -m pytest -q       # 177 tests, must stay offline
+.\.venv\Scripts\python.exe -m pytest -q       # 193 tests, must stay offline
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\triage-demo.exe list
 .\.venv\Scripts\triage-demo.exe run scenario1-transient

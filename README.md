@@ -118,7 +118,7 @@ scenarios/*.yaml       Seven runnable scenarios with assertions
 mock/                  Seeded data + four inbox messages
 scripts/               Foundry agent registration
 docs/                  Plan, architecture, run sheet, FAQ, provisioning
-tests/                 177 tests, all offline
+tests/                 193 tests, all offline
                        test_hardening.py pins the post-review fixes
 ```
 
@@ -167,7 +167,7 @@ python scripts\register_foundry_agents.py --dry-run
 ## Tests
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 177 tests, no network
+.\.venv\Scripts\python.exe -m pytest -q      # 193 tests, no network
 .\.venv\Scripts\python.exe -m ruff check .
 ```
 

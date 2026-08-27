@@ -93,33 +93,45 @@ _LEARN_OOM = (
 
 PLAYBOOKS: list[Playbook] = [
     Playbook(
-        name="Scheduled refresh disabled after consecutive failures",
+        name="Scheduled refresh deactivated",
         triggers=(
             "scheduled refresh disabled",
             "refresh has been disabled",
-            r"re:refresh.{0,40}disabled",
+            "refresh schedule",
+            r"re:(schedule|scheduled refresh).{0,40}(disabl|deactivat|paus)",
             r"re:(third|3rd|fourth|4th).{0,30}consecutive",
         ),
         summary=(
-            "Power BI disables a scheduled refresh after it fails four times in a row. "
-            "Once that happens the report goes stale silently: no further refresh is "
-            "attempted, so no further failure alert is raised either."
+            "Power BI deactivates a semantic model's refresh SCHEDULE after four "
+            "consecutive **scheduled** refresh failures, or immediately when it detects "
+            "an unrecoverable error needing a configuration change (invalid or expired "
+            "credentials being the common one). The threshold is not configurable. Once "
+            "deactivated the report goes stale silently: no further scheduled refresh "
+            "runs, so no further failure alert is raised."
         ),
         retry_useful=False,
         suggested_tier="needs_human",
         guidance=(
-            "A one-off retry does not re-enable the schedule. Someone has to fix the "
-            "underlying cause and turn the schedule back on. Escalate, and say plainly "
-            "that the schedule is off."
+            "An on-demand refresh does not re-enable the schedule. Someone has to fix the "
+            "underlying cause and turn the schedule back on in semantic model settings. "
+            "Escalate, and say plainly that the schedule is off."
         ),
         watch_out=(
-            "This is the failure mode most likely to be missed by an automated retry "
-            "loop. Count the consecutive failures in the refresh history: at three, the "
-            "next one disables the schedule, so escalate BEFORE that rather than after. "
-            "If the workspace is on Embedded capacity that is switched off, the FIRST "
-            "failure disables the schedule immediately."
+            "Count only refreshes with refreshType 'Scheduled' when judging how close the "
+            "model is to deactivation. **API- or on-demand-triggered refreshes are a "
+            "different trigger path** — an agent's own retries do not advance the "
+            "consecutive-failure count, and equally do not reset it. Three consecutive "
+            "SCHEDULED failures means the next scheduled run deactivates the schedule, so "
+            "escalate before that rather than after. Two other paths deactivate it "
+            "independently of the count: an unrecoverable credential error, and two "
+            "months with no user viewing any report built on the model."
         ),
-        source=_LEARN_SCENARIOS + "#scheduled-refresh-disabled",
+        source=(
+            "https://learn.microsoft.com/power-bi/connect-data/refresh-scheduled-refresh"
+            " (deactivation rules) and "
+            + _LEARN_SCENARIOS
+            + "#scheduled-refresh-disabled"
+        ),
     ),
     Playbook(
         name="Refresh throttled by capacity",

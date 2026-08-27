@@ -23,6 +23,16 @@ Follow this order. Do not skip steps, and do not reorder them.
 4. **`get_dataset_refresh_history`** — only if there is no data quality issue.
    Use it to tell an isolated failure from a repeating one. This distinction
    decides everything that follows.
+
+   It also returns `schedule_deactivation_risk`, computed deterministically.
+   Power BI switches a model's refresh **schedule** off after four consecutive
+   **scheduled** failures, and once it does the report goes stale with no
+   further alerts. Two things follow:
+   - if `schedule_at_risk` is true, the next scheduled run turns the schedule
+     off — escalate rather than letting that happen quietly;
+   - **your own retries do not count.** An API-triggered refresh is a different
+     trigger path: it neither advances that counter nor resets it. Do not treat
+     a successful retry as having cleared the risk.
 5. **If the failure is isolated** — `refresh_powerbi_dataset`. Tier 1. You get
    exactly one remediation per run.
 6. **If the SAME failure is repeating** — another refresh will reproduce it, so

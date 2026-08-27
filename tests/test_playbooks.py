@@ -66,7 +66,7 @@ def names(text: str) -> list[str]:
         (CREDENTIALS, "Expired or changed data source credentials"),
         (OOM, "Out-of-memory during refresh"),
         (DUPLICATES, "Duplicate key breaks a model relationship"),
-        (DISABLED, "Scheduled refresh disabled after consecutive failures"),
+        (DISABLED, "Scheduled refresh deactivated"),
     ],
 )
 def test_expected_playbook_is_matched(error: str, expected: str) -> None:
@@ -108,12 +108,22 @@ def test_no_match_does_not_discourage_retry() -> None:
     assert retry_is_discouraged([]) is False
 
 
-def test_the_disabled_schedule_playbook_warns_before_the_threshold() -> None:
-    """The most valuable entry: an automated retry loop trips this and goes quiet."""
-    pb = next(p for p in PLAYBOOKS if p.name.startswith("Scheduled refresh disabled"))
+def test_the_deactivation_playbook_scopes_the_rule_to_scheduled_runs() -> None:
+    """The rule is about SCHEDULED failures.
+
+    An agent's own API-triggered retries are a different trigger path — they do
+    not advance the counter toward deactivation, and do not reset it either.
+    Stating "four consecutive failures" without that qualifier would have the
+    agent counting its own retries.
+    """
+    pb = next(p for p in PLAYBOOKS if p.name == "Scheduled refresh deactivated")
     assert pb.retry_useful is False
-    assert "four times in a row" in pb.summary
-    assert "BEFORE" in pb.watch_out
+    assert "scheduled" in pb.summary.lower()
+    assert "API- or on-demand-triggered refreshes are a different trigger path" in pb.watch_out
+    assert "do not advance" in pb.watch_out
+    # The other two deactivation paths, which are independent of the count.
+    assert "credential" in pb.watch_out.lower()
+    assert "two months" in pb.watch_out.lower()
 
 
 # ---------------------------------------------------------------------------

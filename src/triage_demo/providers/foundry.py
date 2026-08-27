@@ -39,6 +39,21 @@ logger = logging.getLogger("triage.provider.foundry")
 
 FOUNDRY_SCOPE = "https://ai.azure.com/.default"
 
+#: Statuses worth trying again. A 400 is not here on purpose: a malformed
+#: request will be malformed on the retry too.
+_RETRYABLE_STATUS = frozenset({408, 429, 500, 502, 503, 504})
+
+
+def _retry_after(resp: Any) -> float | None:
+    """Honour a Retry-After header when the service sends one."""
+    raw = resp.headers.get("Retry-After") if hasattr(resp, "headers") else None
+    if not raw:
+        return None
+    try:
+        return min(float(raw), 30.0)
+    except (TypeError, ValueError):
+        return None
+
 
 class FoundryAgentProvider:
     """Invokes a named Foundry agent over the responses API."""
@@ -52,6 +67,8 @@ class FoundryAgentProvider:
         agent_name: str,
         agent_version: str | None = None,
         handoff_mode: str = "responses",
+        max_attempts: int = 3,
+        backoff_base: float = 1.5,
     ):
         if not project_endpoint:
             raise ValueError("FOUNDRY_PROJECT_ENDPOINT is required for foundry mode")
@@ -60,6 +77,8 @@ class FoundryAgentProvider:
         self._agent_name = agent_name
         self._agent_version = agent_version
         self.handoff_mode = handoff_mode
+        self._max_attempts = max(1, int(max_attempts))
+        self._backoff_base = float(backoff_base)
         self._token: str = ""
         self._token_expires_at: float = 0.0
         self.last_content_filters: list[dict[str, Any]] = []
@@ -92,8 +111,6 @@ class FoundryAgentProvider:
         tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.1,
     ) -> LLMResponse:
-        import httpx
-
         agent_ref: dict[str, Any] = {"type": "agent_reference", "name": self._agent_name}
         if self._agent_version:
             agent_ref["version"] = str(self._agent_version)
@@ -110,25 +127,81 @@ class FoundryAgentProvider:
             model=self.model_name,
             **{"gen_ai.agent.name": self._agent_name, "handoff.mode": self.handoff_mode},
         ) as span:
-            # NOTE: this route rejects `?api-version=v1` — it requires the /v1
-            # path form. Discovered by probing; the error message is explicit.
-            url = f"{self._endpoint}/openai/v1/responses"
-            async with httpx.AsyncClient(timeout=180) as client:
-                resp = await client.post(url, headers=self._headers(), json=payload)
-                if resp.status_code != 200:
-                    logger.error(
-                        "Foundry responses call failed %s: %s",
-                        resp.status_code,
-                        resp.text[:500],
-                    )
-                resp.raise_for_status()
-                body = resp.json()
-
+            body = await self._post_with_retry(payload)
             parsed = _parse_response(body)
             self.last_content_filters = body.get("content_filters", []) or []
             span.record_usage(parsed.prompt_tokens, parsed.completion_tokens)
             span.record_finish(parsed.finish_reason)
             return parsed
+
+    async def _post_with_retry(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """POST the request, retrying transient failures with backoff.
+
+        A live service occasionally returns 429 or a 5xx, and the connection can
+        drop. Without this, roughly one run in four ended as ``agent_crashed`` —
+        recorded honestly, but not something you want happening in front of a
+        customer.
+
+        Deliberately narrow: only rate limits, server errors and transport
+        failures are retried. A 400 means the request is wrong and will be
+        wrong again, so it fails immediately rather than burning the budget
+        three times discovering that.
+        """
+        import asyncio
+
+        import httpx
+
+        # NOTE: this route rejects `?api-version=v1` — it requires the /v1 path
+        # form. Discovered by probing; the error message is explicit.
+        url = f"{self._endpoint}/openai/v1/responses"
+        last_error: Exception | None = None
+
+        for attempt in range(self._max_attempts):
+            try:
+                async with httpx.AsyncClient(timeout=180) as client:
+                    resp = await client.post(url, headers=self._headers(), json=payload)
+
+                if resp.status_code == 200:
+                    return resp.json()
+
+                if resp.status_code in _RETRYABLE_STATUS and attempt < self._max_attempts - 1:
+                    delay = _retry_after(resp) or self._backoff(attempt)
+                    logger.warning(
+                        "Foundry returned %s; retrying in %.1fs (attempt %d/%d)",
+                        resp.status_code,
+                        delay,
+                        attempt + 1,
+                        self._max_attempts,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+
+                logger.error(
+                    "Foundry responses call failed %s: %s", resp.status_code, resp.text[:500]
+                )
+                resp.raise_for_status()
+
+            except (httpx.TransportError, httpx.TimeoutException) as exc:
+                last_error = exc
+                if attempt >= self._max_attempts - 1:
+                    break
+                delay = self._backoff(attempt)
+                logger.warning(
+                    "Foundry call failed with %s; retrying in %.1fs (attempt %d/%d)",
+                    type(exc).__name__,
+                    delay,
+                    attempt + 1,
+                    self._max_attempts,
+                )
+                await asyncio.sleep(delay)
+
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("Foundry call exhausted retries without a response")
+
+    def _backoff(self, attempt: int) -> float:
+        """Exponential with a small deterministic jitter offset."""
+        return min(self._backoff_base * (2**attempt), 20.0)
 
     def guardrail_summary(self) -> dict[str, bool]:
         """Flatten the last call's prompt-side filter results.
