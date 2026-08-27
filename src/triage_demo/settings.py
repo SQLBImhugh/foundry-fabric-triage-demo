@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     # and refuses to run if the read succeeds, because that means the app
     # registration is not scoped and can read the whole tenant.
     graph_canary_mailbox: str = ""
+
+    # Durable incident store. Empty = JSON file next to the repo, which is the
+    # right choice on a laptop and the wrong one in a container: the filesystem
+    # goes away on recycle and takes the open incidents with it, which would let
+    # the agent remediate the same failure twice after a restart.
+    incident_table_endpoint: str = ""
+    incident_table_name: str = "incidents"
     # Set once an Exchange ApplicationAccessPolicy scopes the app registration
     # to `graph_mailbox`. Preflight warns loudly while this is False, because an
     # unscoped app-only Mail.Read grant can read EVERY mailbox in the tenant.

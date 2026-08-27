@@ -59,7 +59,10 @@ class BIRequest(BaseModel):
     workspace_id: str | None = None
     error_code: str | None = None
 
-    source: Literal["mock", "graph"] = "mock"
+    # "interactive" covers an alert pasted straight into the Foundry Playground.
+    # It is a genuinely different provenance from a polled mailbox and the
+    # incident record should say so rather than claim the mail arrived.
+    source: Literal["mock", "graph", "interactive"] = "mock"
 
     def error_text(self) -> str:
         """The blob a signature is computed over."""

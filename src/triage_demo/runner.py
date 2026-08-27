@@ -120,14 +120,34 @@ class TriageRunner:
         self.settings = settings
         self.base_dir = Path(base_dir)
         self.on_event = on_event
-        self.store: IncidentStore = store or JsonFileIncidentStore(
-            self.base_dir / "runs" / "incidents.json"
-        )
+        self.store: IncidentStore = store or self._build_store()
         self.flag_table = DataQualityFlagTable(
             flag_table_path or (self.base_dir / "runs" / "dq_flags.csv")
         )
 
     # --- inbox -------------------------------------------------------------
+
+    def _build_store(self) -> IncidentStore:
+        """Choose where incidents live.
+
+        Falls back to the JSON file when no table is configured, so the offline
+        rehearsal path is unchanged and needs no Azure dependencies.
+        """
+        endpoint = self.settings.incident_table_endpoint
+        if not endpoint:
+            return JsonFileIncidentStore(self.base_dir / "runs" / "incidents.json")
+
+        from triage_demo.store.azure_table import AzureTableIncidentStore
+
+        store = AzureTableIncidentStore(
+            endpoint=endpoint, table_name=self.settings.incident_table_name
+        )
+        if not store.is_durable:
+            logger.warning(
+                "Incident table %s unavailable; incidents will not survive a restart",
+                endpoint,
+            )
+        return store
 
     def build_inbox(self):
         if self.settings.triage_tool_mode == "live" and self.settings.graph_tenant_id:

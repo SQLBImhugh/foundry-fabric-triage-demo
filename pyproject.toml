@@ -24,6 +24,15 @@ azure = [
     "openai>=1.40",
     "azure-monitor-opentelemetry>=1.6",
     "msal>=1.28",
+    "azure-data-tables>=12.5",
+]
+# Only needed to run the controller AS a Foundry hosted agent. Kept separate so
+# the offline demo path never pulls in the hosting stack.
+hosted = [
+    "agent-framework>=1.0.0b1",
+    "agent-framework-foundry-hosting>=1.0.0b1",
+    "azure-data-tables>=12.5",
+    "azure-identity>=1.17",
 ]
 dev = [
     "pytest>=8.2",
