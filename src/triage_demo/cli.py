@@ -107,6 +107,22 @@ def _make_event_hook(verbose: bool):
             else:
                 style = "red" if status in ("error", "refused") else "dim"
                 console.print(f"     [{style}]{status}[/{style}]")
+        elif event == "playbooks_matched":
+            names = payload.get("names") or []
+            warn = payload.get("retry_discouraged")
+            console.print(
+                Panel(
+                    "\n".join(f"  - {n}" for n in names)
+                    + (
+                        "\n\n[bold yellow]All matched playbooks say a retry will not "
+                        "help.[/bold yellow]"
+                        if warn
+                        else ""
+                    ),
+                    title=f"Knowledge base — {len(names)} playbook(s) matched",
+                    border_style="cyan",
+                )
+            )
         elif event == "policy_violation":
             console.print(
                 Panel(

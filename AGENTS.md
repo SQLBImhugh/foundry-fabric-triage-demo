@@ -16,7 +16,7 @@ It runs fully offline. Keep it that way.
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 
-.\.venv\Scripts\python.exe -m pytest -q       # 201 tests, must stay offline
+.\.venv\Scripts\python.exe -m pytest -q       # 177 tests, must stay offline
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\triage-demo.exe list
 .\.venv\Scripts\triage-demo.exe run scenario1-transient
@@ -62,6 +62,18 @@ parametrized list in `tests/test_scenarios.py`. The `expect` block is the test.
 **A prompt change**: prompts are hashed onto every incident, so a change is
 traceable. If running in Foundry mode, **re-register the agents** or the change
 does not take effect.
+
+**A playbook**: add a `Playbook` to `knowledge/playbooks.py` with triggers, a
+`retry_useful` verdict and a **public** Microsoft Learn source, then a test that
+it fires on realistic error text. Retrieval is capped at 3 — if a new entry
+matters more than an existing one, raise its trigger specificity rather than the
+cap.
+
+> **Sourcing rule.** Playbook content must come from public documentation.
+> Internal engineering TSGs exist and are more detailed, but they are written for
+> on-call engineers debugging the *service*, carry owner and incident-management
+> references, and this repo is shared with customers. Use internal sources to
+> decide *what matters*; write the entry from public docs. A test enforces this.
 
 ## Style
 

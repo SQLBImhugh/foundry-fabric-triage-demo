@@ -55,6 +55,13 @@ change raises any of them.
 returns the refusal *to the agent*, which can then escalate to a human. Killing
 the run at that moment would leave the operator with silence.
 
+**Retrieved knowledge, not a bigger prompt.** A catalogue of documented failure
+modes lives in `knowledge/playbooks.py`; only entries whose triggers match the
+incoming error are injected, capped at three. Each states whether a retry is
+*useful* — which is the part that changes the decision. "Credentials expired"
+and "capacity throttled" both surface as "refresh failed", but retrying fixes
+one and wastes capacity on the other.
+
 **Deterministic evidence beats model assertion.** Duplicate detection is a plain
 CSV scan. The Data Quality agent interprets the numbers; it does not produce
 them. If the model contradicts the scan, the scan wins, its prose is discarded,
@@ -81,6 +88,8 @@ triggering a second fix.
 src/triage_demo/
   policy.py            TriagePolicy + PolicyLedger      <- the safety story
   approvals.py         Human-in-the-loop gates          <- fail-closed by design
+  knowledge/
+    playbooks.py       Retrieved failure-mode catalogue <- public sources only
   signature.py         Failure signatures for dedup
   redaction.py         11 secret patterns, applied at the store boundary
   models.py            Typed contracts for every agent boundary
@@ -109,7 +118,7 @@ scenarios/*.yaml       Seven runnable scenarios with assertions
 mock/                  Seeded data + four inbox messages
 scripts/               Foundry agent registration
 docs/                  Plan, architecture, run sheet, FAQ, provisioning
-tests/                 201 tests, all offline
+tests/                 177 tests, all offline
                        test_hardening.py pins the post-review fixes
 ```
 
@@ -158,7 +167,7 @@ python scripts\register_foundry_agents.py --dry-run
 ## Tests
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 201 tests, no network
+.\.venv\Scripts\python.exe -m pytest -q      # 177 tests, no network
 .\.venv\Scripts\python.exe -m ruff check .
 ```
 

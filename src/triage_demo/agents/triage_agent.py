@@ -22,6 +22,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from triage_demo.knowledge.playbooks import (
+    format_playbooks,
+    retry_is_discouraged,
+    select_playbooks,
+)
 from triage_demo.models import (
     BIRequest,
     TriageClassification,
@@ -427,6 +432,33 @@ class TriageAgent:
             "",
             f"computed failure signature: {deps.signature}",
             f"registered tables: {', '.join(deps.datasets) or 'none'}",
+        ]
+
+        # Retrieved knowledge, not prompt bloat: only playbooks whose triggers
+        # match this error are injected, so the catalogue can grow without
+        # every call paying for it.
+        matched = select_playbooks(request.error_text())
+        if matched:
+            logger.info(
+                "Matched %d playbook(s): %s", len(matched), [p.name for p in matched]
+            )
+            self._emit(
+                "playbooks_matched",
+                {
+                    "names": [p.name for p in matched],
+                    "retry_discouraged": retry_is_discouraged(matched),
+                },
+            )
+            lines += ["", format_playbooks(matched)]
+            if retry_is_discouraged(matched):
+                lines += [
+                    "",
+                    "NOTE: every matched playbook indicates a retry will NOT resolve "
+                    "this. Do not propose one unless you can say why those playbooks "
+                    "do not apply.",
+                ]
+
+        lines += [
             "",
             "Begin with get_request_context. Follow the procedure in order.",
         ]

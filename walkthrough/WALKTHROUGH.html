@@ -37,7 +37,7 @@
     <span class="chip">project <b>bi-request-triage</b></span>
     <span class="chip">model <b>gpt-5.6-luna</b></span>
     <span class="chip on">7 / 7 scenarios passing live</span>
-    <span class="chip on">201 offline tests</span>
+    <span class="chip on">177 offline tests</span>
     <span class="chip">captured 27 Aug 2026</span>
   </div>
 </header>
@@ -115,6 +115,23 @@
     The duplicate counts come from a plain scan of the source table, with no model involved. The
     Data Quality agent <em>interprets</em> those numbers; it never produces them. That is what makes
     the finding identical on every run — and it means a model that contradicts the evidence loses.
+  </div>
+
+  <div class="note">
+    <span class="label">Knowledge is retrieved, not pasted into the prompt</span>
+    A catalogue of documented Power BI failure modes sits alongside the agent. Only the entries
+    whose triggers match the incoming error are injected — capped at three — so the catalogue can
+    grow without every call paying for it.
+    <br><br>
+    Each entry answers the question that actually changes the decision: <b>is a retry useful?</b>
+    “Credentials expired” and “capacity throttled” both surface as <em>refresh failed</em>, but
+    retrying resolves one and merely wastes capacity on the other while delaying the person who
+    could fix it.
+    <br><br>
+    The entry that earns its place most: <b>Power BI disables a scheduled refresh after four
+    consecutive failures.</b> An automated retry loop trips that threshold and then goes quiet —
+    the report is stale, and no further alert is raised because no further refresh is attempted.
+    The playbook tells the agent to escalate at three.
   </div>
 </section>
 
@@ -603,6 +620,9 @@
           <td>Not yet wired — see limitations.</td></tr>
       <tr><td><b>Action budgets and allowlist</b></td><td class="no">We wrote this</td>
           <td><b>Nothing native does it</b>, and Microsoft's own guidance says enforcement belongs in your code.</td></tr>
+      <tr><td>Retrieved failure-mode knowledge base</td><td class="no">We wrote this</td>
+          <td>Documented Power BI failure modes, injected only when the error matches.
+              Sourced from public docs so the asset stays shareable.</td></tr>
       <tr><td>Human-in-the-loop approval</td><td class="no">We wrote this</td>
           <td>Fail-closed, fingerprint-bound, expiring, single-use. Nothing native enforces it.</td></tr>
       <tr><td>Failure signatures and dedup</td><td class="no">We wrote this</td>
@@ -697,7 +717,7 @@
 <footer>
   Captured 27 August 2026 against Foundry project <code>bi-request-triage</code>
   (<code>bitriage-foundry-eus</code>, East US) on <code>gpt-5.6-luna</code>.
-  All seven scenarios passed against the live service; 201 tests pass offline with no tenant.
+  All seven scenarios passed against the live service; 177 tests pass offline with no tenant.
   Sample data is synthetic.
 </footer>
 
