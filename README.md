@@ -108,11 +108,27 @@ tests/                 122 tests, all offline
 
 | Question | File |
 |---|---|
+| **Customer-facing walkthrough (annotated screenshots)** | [`walkthrough/WALKTHROUGH.html`](walkthrough/WALKTHROUGH.html) |
 | What's the build plan, and how far along is it? | [`docs/plan.md`](docs/plan.md) |
+| Which Foundry features are native vs. hand-rolled? | [`docs/foundry-native-architecture.md`](docs/foundry-native-architecture.md) |
 | How does it work and why is it built this way? | [`docs/architecture.md`](docs/architecture.md) |
 | How do I actually run the demo live? | [`docs/run-sheet.md`](docs/run-sheet.md) |
 | What do I say when they ask X? | [`docs/faq.md`](docs/faq.md) |
 | What has to exist in the tenant first? | [`docs/provisioning.md`](docs/provisioning.md) |
+
+Open the walkthrough locally:
+
+```powershell
+cd walkthrough
+..\.venv\Scripts\python.exe -m http.server 8899
+# then browse http://127.0.0.1:8899/WALKTHROUGH.html
+```
+
+Regenerate its terminal captures after a code change:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\capture_walkthrough.py
+```
 
 ## Running against a real tenant
 

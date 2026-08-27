@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BI Request Triage on Microsoft Foundry — Walkthrough</title>
+<link rel="stylesheet" href="walkthrough.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <span class="brand">BI Request Triage <span>·</span> Foundry</span>
+  <a href="#what">What it is</a>
+  <a href="#flow">The flow</a>
+  <a href="#components">Components</a>
+  <a href="#run1">1 · Transient</a>
+  <a href="#run2">2 · Data quality</a>
+  <a href="#run3">3 · Suppressed</a>
+  <a href="#run4">4 · Refused</a>
+  <a href="#run5">5 · Allowlist</a>
+  <a href="#native">Native vs custom</a>
+  <a href="#limits">Limitations</a>
+</nav>
+
+<div class="wrap">
+
+<header class="hero">
+  <h1>A BI failure arrives by email.<br>Two agents decide what happens next.</h1>
+  <p class="sub">
+    This document walks through a working multi-agent triage system on Microsoft Foundry —
+    what each part is, what it did when we ran it, and where the boundaries are.
+    Every screenshot is from a live run against a real Foundry project.
+  </p>
+  <div class="meta-row">
+    <span class="chip">project <b>bi-request-triage</b></span>
+    <span class="chip">model <b>gpt-5.6-luna</b></span>
+    <span class="chip on">5 / 5 scenarios passing live</span>
+    <span class="chip on">122 offline tests</span>
+    <span class="chip">captured 27 Aug 2026</span>
+  </div>
+</header>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section id="what">
+  <h2><span class="num">A</span> What this system does</h2>
+  <p class="lede">
+    A Power BI refresh fails. The alert lands in a monitored mailbox. From there, no human is
+    involved unless the system decides one should be.
+  </p>
+
+  <p>
+    A <b>Triage agent</b> reads the alert and works a fixed procedure: has this failure been seen
+    before, is it a data problem, is it safe to retry. It consults a separate <b>Data Quality
+    agent</b> before it is allowed to consider any fix. If — and only if — the failure is transient
+    and the data is clean, it performs exactly one remediation and reports what it did.
+  </p>
+
+  <p>
+    The interesting part is not that it can fix things. Anyone can wire a model to a refresh button.
+    The interesting part is what stops it refreshing forty times during an outage, or doing something
+    nobody asked for. Three of the five runs below are about that.
+  </p>
+
+  <div class="note">
+    <span class="label">The one-sentence version</span>
+    The model decides what to <em>propose</em>; a controller decides what is allowed to
+    <em>happen</em>. Those are deliberately different things, and the gap between them is where the
+    safety lives.
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section id="flow">
+  <h2><span class="num">B</span> The flow</h2>
+  <p class="lede">Every run follows the same path. The order is enforced, not suggested.</p>
+
+  <div class="flow">
+<pre>   email alert
+        │
+        ▼
+   compute failure signature ──────▶ <b>incident store</b>  "seen this before?"
+        │                                   │
+        ▼                                   ▼
+   <b>TRIAGE AGENT</b>  (Foundry) ◀────── known?  ──▶ notify · <span class="g">duplicate_suppressed</span>
+        │
+        │   every step charged against the <b>policy ledger</b> before it runs
+        │
+        ├─▶ get_request_context
+        ├─▶ get_known_incidents
+        ├─▶ consult_data_quality_agent ──▶ <b>DATA QUALITY AGENT</b>  (Foundry)
+        │        │                                  ▲
+        │        │        deterministic scan ───────┘   (runs first, no model)
+        │        ▼
+        │   issue found? ──▶ write flag · notify · <span class="g">flagged_data_quality</span>
+        │        │
+        │        no
+        │        ▼
+        ├─▶ get_dataset_refresh_history
+        ├─▶ refresh_powerbi_dataset      ◀── <span class="r">1 of 1 remediation permitted</span>
+        ├─▶ notify_teams
+        └─▶ report_resolution
+                 │
+                 ▼
+        validate the claim against the evidence
+                 │
+                 ▼
+        persist EVERY outcome — including crashes and refusals</pre>
+  </div>
+
+  <div class="note ok">
+    <span class="label">Why the scan runs before the model</span>
+    The duplicate counts come from a plain scan of the source table, with no model involved. The
+    Data Quality agent <em>interprets</em> those numbers; it never produces them. That is what makes
+    the finding identical on every run — and it means a model that contradicts the evidence loses.
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section id="components">
+  <h2><span class="num">C</span> The components</h2>
+  <p class="lede">
+    Each piece below is a real object in the Foundry project, shown as it appears in the portal.
+  </p>
+
+  <!-- ── agents list ── -->
+  <div class="figure">
+    <div class="cap-top">
+      <span class="where">Foundry → Build → Agents</span>
+      Two agents, not one agent with extra tools
+    </div>
+    <div class="shot">
+      <img src="shots/01-build.png" alt="Foundry Agents list showing bi-data-quality and bi-triage">
+      <div class="ring c1" style="left:15.2%;top:31.5%;width:83.5%;height:10.5%"></div>
+      <div class="mk c1" style="left:12.4%;top:34.4%">1</div>
+      <div class="ring c2 oval" style="left:31.5%;top:36.6%;width:3.6%;height:5.6%"></div>
+      <div class="mk c2" style="left:37.4%;top:39.4%">2</div>
+      <div class="ring c3" style="left:58.4%;top:36.8%;width:6.5%;height:5.2%"></div>
+      <div class="mk c3" style="left:56%;top:39.4%">3</div>
+      <div class="mk c4" style="left:9.8%;top:47.9%">4</div>
+    </div>
+    <ul class="callouts">
+      <li><span class="n c1">1</span><span class="txt">
+        <b>Two separate agents.</b> <code>bi-data-quality</code> and <code>bi-triage</code> are
+        independent Foundry agents — separate instructions, separate identities, separately
+        versioned. The triage agent reaches the other one through a tool call, which is what makes
+        this a multi-agent system rather than one agent with a longer prompt.
+      </span></li>
+      <li><span class="n c2">2</span><span class="txt">
+        <b>Versions are first-class.</b> Each agent carries a version number that increments when its
+        definition changes. This matters more than it looks: a registered agent does <em>not</em>
+        pick up local prompt edits, so "which version is actually serving" is a real question with a
+        real answer.
+      </span></li>
+      <li><span class="n c3">3</span><span class="txt">
+        <b>Both are prompt agents.</b> No containers, no build pipeline, no registry. The heavier
+        hosted-agent option exists and is not needed here.
+      </span></li>
+      <li><span class="n c4">4</span><span class="txt">
+        <b>The rest of the platform surface.</b> Deployments, Tools, Knowledge, Memory, Evaluations,
+        Guardrails — these are the things you would otherwise build yourself.
+      </span></li>
+    </ul>
+  </div>
+
+  <!-- ── agent detail ── -->
+  <div class="figure">
+    <div class="cap-top">
+      <span class="where">Foundry → Build → Agents → bi-triage</span>
+      The orchestrator's definition
+    </div>
+    <div class="shot">
+      <img src="shots/02-agent-detail.png" alt="bi-triage agent definition showing model, instructions and tools">
+      <div class="ring c1" style="left:15.2%;top:16.3%;width:29%;height:5%"></div>
+      <div class="mk c1" style="left:12.4%;top:18.3%">1</div>
+      <div class="ring c2" style="left:73.5%;top:7.4%;width:12.5%;height:4.2%"></div>
+      <div class="mk c2" style="left:71%;top:9.4%">2</div>
+      <div class="ring c3" style="left:15.2%;top:63.5%;width:29%;height:36%"></div>
+      <div class="mk c3" style="left:12.4%;top:81%">3</div>
+      <div class="ring c4" style="left:23.2%;top:11.2%;width:5.2%;height:3.6%"></div>
+      <div class="mk c4" style="left:31.5%;top:13%">4</div>
+    </div>
+    <ul class="callouts">
+      <li><span class="n c1">1</span><span class="txt">
+        <b>Model: gpt-5.6-luna</b>, on a Global Standard deployment. Swapping the model is a
+        dropdown, not a rewrite — the agent's tools and instructions are independent of it.
+      </span></li>
+      <li><span class="n c2">2</span><span class="txt">
+        <b>Version 2.</b> The definition shown is the one that will serve the next request.
+      </span></li>
+      <li><span class="n c3">3</span><span class="txt">
+        <b>Seven tools — and that is the entire list.</b> This is the complete set of things this
+        agent can do. Anything outside it is refused before it executes, which is demonstrated in
+        run 5. Note <code>consult_data_quality_agent</code>: the handoff to the second agent is
+        itself a tool, so it is subject to the same accounting as everything else.
+      </span></li>
+      <li><span class="n c4">4</span><span class="txt">
+        <b>Traces, Monitor, Evaluation, Optimize.</b> Observability and evaluation are tabs on the
+        agent, not a separate system to stand up.
+      </span></li>
+    </ul>
+  </div>
+
+  <!-- ── guardrails ── -->
+  <div class="figure">
+    <div class="cap-top">
+      <span class="where">Foundry → Build → Guardrails</span>
+      Content safety on untrusted input
+    </div>
+    <div class="shot">
+      <img src="shots/03-guardrails.png" alt="Guardrails list showing bi-triage-guardrail applied to gpt-5.6-luna">
+      <div class="ring c1" style="left:15.2%;top:28.5%;width:83.5%;height:5.5%"></div>
+      <div class="mk c1" style="left:12.4%;top:31.1%">1</div>
+      <div class="ring c2" style="left:38%;top:29.6%;width:3.5%;height:3.4%"></div>
+      <div class="mk c2" style="left:35.5%;top:31.2%">2</div>
+      <div class="ring c3" style="left:57.8%;top:29.4%;width:8%;height:3.8%"></div>
+      <div class="mk c3" style="left:55%;top:31.1%">3</div>
+    </div>
+    <ul class="callouts">
+      <li><span class="n c1">1</span><span class="txt">
+        <b>A guardrail policy defined in source and applied by script.</b> It enables hate, violence,
+        jailbreak and — most importantly here — <b>indirect attack</b> detection.
+      </span></li>
+      <li><span class="n c2">2</span><span class="txt">
+        <b>Scoped to a model.</b> Guardrails attach to deployments and agents rather than living
+        inside prompt text.
+      </span></li>
+      <li><span class="n c3">3</span><span class="txt">
+        <b>Bound to gpt-5.6-luna</b>, so it is in force for every call this system makes.
+      </span></li>
+    </ul>
+  </div>
+
+  <div class="note warn">
+    <span class="label">Why indirect-attack detection matters in this specific system</span>
+    This agent reads <b>email</b> — text written by someone outside your organisation. That is the
+    textbook vector for indirect prompt injection: instructions hidden in content the agent is asked
+    to process. Foundry screens for it on every call and reports the result inline, so we can show
+    that the check ran rather than assert that it did.
+    <br><br>
+    Guardrails are <em>content</em> filters, though. They do not decide whether an agent may refresh
+    a dataset. That is a different problem, solved differently — see <a href="#native">Native vs
+    custom</a>.
+  </div>
+
+  <!-- ── component gallery ── -->
+  <h3>Everything else in the project</h3>
+  <div class="gallery">
+
+    <div class="card">
+      <div class="head">
+        <h4>Model deployment</h4>
+        <div class="role">The reasoning engine behind both agents</div>
+      </div>
+      <div class="shotwrap">
+        <img src="shots/04-deployments.png" alt="gpt-5.6-luna deployment detail">
+      </div>
+      <div class="body">
+        <span class="tag native">Foundry native</span>
+        A single <b>gpt-5.6-luna</b> Global Standard deployment serves both agents. Note
+        <b>“API Key authentication is disabled”</b> — every call in this system authenticates with
+        Entra identity, so there is no key to leak, rotate, or find in a config file.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="head">
+        <h4>Traces</h4>
+        <div class="role">Per-run visibility, including failures</div>
+      </div>
+      <div class="shotwrap">
+        <img src="shots/05-traces.png" alt="Traces tab with duration, token and cost filters">
+      </div>
+      <div class="body">
+        <span class="tag native">Foundry native</span>
+        Connecting an Application Insights resource turns on trace capture, filterable by
+        <b>duration, tokens in/out, estimated cost</b> and status. Traces from portal conversations
+        appear here directly; API-driven runs are additionally instrumented by the application with
+        OpenTelemetry GenAI spans. <b>Metadata only — no prompt or completion content is recorded.</b>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section id="run1">
+  <h2><span class="num">1</span> A transient failure, resolved</h2>
+  <p class="lede">
+    The straightforward case: a scheduled refresh timed out. Nothing is wrong with the data, and the
+    failure is isolated, so one retry is the correct answer.
+  </p>
+
+  <div class="figure">
+    <div class="cap-top"><span class="where">live run · gpt-5.6-luna</span> scenario 1 — transient</div>
+    <div class="shot"><img src="shots/run-1-transient.svg" alt="Terminal output of the transient failure run"></div>
+    <ul class="callouts">
+      <li><span class="n c1">1</span><span class="txt">
+        <b>The known-issue check runs second, before anything else is considered.</b> The failure is
+        reduced to a signature — a hash of the error with GUIDs, timestamps and request IDs
+        normalised out — and checked against the incident store. Only if it is new does the agent
+        continue.
+      </span></li>
+      <li><span class="n c2">2</span><span class="txt">
+        <b>The data quality handoff happens before any fix is contemplated.</b> A separate agent
+        returns a structured finding. Refreshing a report never fixes a data problem, so this
+        question is settled first.
+      </span></li>
+      <li><span class="n c3">3</span><span class="txt">
+        <b>History turns an assumption into evidence.</b> Two prior refreshes completed and one
+        failed, so “isolated, therefore safe to retry” is a conclusion drawn from data rather than a
+        guess.
+      </span></li>
+      <li><span class="n c4">4</span><span class="txt">
+        <b>One remediation.</b> The refresh is triggered and verified. The policy ledger shows
+        <code>Remediation writes: 1</code> — that is a hard ceiling, not a tendency.
+      </span></li>
+      <li><span class="n c5">5</span><span class="txt">
+        <b>The summary states what happened, not what was attempted.</b> Report, error, action,
+        outcome, timestamp, and the specific evidence behind the decision.
+      </span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section id="run2">
+  <h2><span class="num">2</span> A data quality issue — found, flagged, not fixed</h2>
+  <p class="lede">
+    The refresh failed with a duplicate-key error that does not say which rows are at fault. The
+    system answers that question, records it, and deliberately stops.
+  </p>
+
+  <div class="figure">
+    <div class="cap-top"><span class="where">live run · gpt-5.6-luna</span> scenario 2 — data quality</div>
+    <div class="shot"><img src="shots/run-2-data-quality.svg" alt="Terminal output of the data quality run"></div>
+    <ul class="callouts">
+      <li><span class="n c1">1</span><span class="txt">
+        <b>Same handoff, different answer.</b> The Data Quality agent returns
+        <code>has_issue=True</code> with specifics.
+      </span></li>
+      <li><span class="n c2">2</span><span class="txt">
+        <b>The numbers are exact, and they are reproducible.</b> Four duplicate rows across two key
+        groups on <code>(well_id, production_date)</code>. The original email only said “duplicate
+        values exist” — it did not say which rows, how many, or on what key. Run this again and you
+        get the same four, because a scan produced them rather than a model.
+      </span></li>
+      <li><span class="n c3">3</span><span class="txt">
+        <b>A row is written to the data quality flag table</b> — affected table, issue type, counts,
+        detail. That is the durable artifact a data steward picks up tomorrow.
+      </span></li>
+      <li><span class="n c4">4</span><span class="txt">
+        <b>No remediation is attempted, and the ledger confirms it.</b> This is a decision, not a
+        gap. Look at the data: two duplicate rows are byte-identical and two differ by a single
+        value. Keeping the first, the last, or the maximum are three different business answers, and
+        picking wrong silently corrupts a production table. Flagging is cheap and reversible;
+        deduplicating is neither.
+      </span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section id="run3">
+  <h2><span class="num">3</span> The same alert again — suppressed</h2>
+  <p class="lede">
+    During a real outage the alert does not arrive once. It arrives every fifteen minutes for two
+    hours. This is what stops the system reacting to each one.
+  </p>
+
+  <div class="figure">
+    <div class="cap-top"><span class="where">live run · gpt-5.6-luna</span> scenario 2b — duplicate suppression</div>
+    <div class="shot"><img src="shots/run-3-suppressed.svg" alt="Terminal output showing duplicate suppression on the second run"></div>
+    <ul class="callouts">
+      <li><span class="n c1">1</span><span class="txt">
+        <b>Run 1 behaves exactly as before</b> — flags the issue and notifies.
+      </span></li>
+      <li><span class="n c2">2</span><span class="txt">
+        <b>Run 2 is a different email with the same failure.</b> Different message id, different
+        arrival time; the signature matches. <code>known_related_issue=True</code>.
+      </span></li>
+      <li><span class="n c3">3</span><span class="txt">
+        <b>It stops early.</b> Four tool calls instead of six. No second flag row, no second
+        remediation, and the notification says “already tracked” rather than reporting it as new.
+      </span></li>
+      <li><span class="n c4">4</span><span class="txt">
+        <b>One incident, occurrence count 2.</b> Not two incidents. The queue a human reads stays
+        readable during an outage, which is precisely when it matters.
+      </span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section id="run4">
+  <h2><span class="num">4</span> The agent asks for a second fix — and is refused</h2>
+  <p class="lede">
+    Everything so far assumed the agent behaves. This run is what happens when it does not.
+  </p>
+
+  <div class="figure">
+    <div class="cap-top"><span class="where">live run · gpt-5.6-luna</span> scenario 3 — policy refusal</div>
+    <div class="shot"><img src="shots/run-4-refused.svg" alt="Terminal output showing the controller refusing a second remediation"></div>
+    <ul class="callouts">
+      <li><span class="n c1">1</span><span class="txt">
+        <b>The first remediation is permitted</b> and completes.
+      </span></li>
+      <li><span class="n c5">2</span><span class="txt">
+        <b>A second is requested — and never executes.</b> The limit is an integer in code, checked
+        before dispatch. No wording change to any prompt can raise it, because no prompt is consulted.
+      </span></li>
+      <li><span class="n c2">3</span><span class="txt">
+        <b>The refusal is handed back to the agent as data, not raised as an error.</b> That is a
+        deliberate choice: the agent can still notify a human. An agent that goes silent the moment
+        it is blocked is worse than one that escalates.
+      </span></li>
+      <li><span class="n c4">4</span><span class="txt">
+        <b>The run ends as <code>needs_human</code>, not as a false success</b>, and the incident is
+        flagged for investigation. Blocked attempts are recorded — the gap between what the agent
+        wanted and what it was allowed to do is exactly the population you mine when deciding what to
+        automate next.
+      </span></li>
+    </ul>
+  </div>
+
+  <div class="note danger">
+    <span class="label">What this rules out</span>
+    The failure mode everyone has heard about — an agent retrying a broken job forty times overnight
+    because nothing was counting — is not mitigated here by careful prompt wording. It is
+    arithmetically impossible: the budget is spent, and the next request is denied.
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section id="run5">
+  <h2><span class="num">5</span> An action nobody authorised</h2>
+  <p class="lede">
+    The previous run tested a budget. This one tests the boundary: the agent asks to delete the
+    dataset.
+  </p>
+
+  <div class="figure">
+    <div class="cap-top"><span class="where">live run · gpt-5.6-luna</span> scenario 4 — outside the allowlist</div>
+    <div class="shot"><img src="shots/run-5-allowlist.svg" alt="Terminal output showing an unlisted action being refused"></div>
+    <ul class="callouts">
+      <li><span class="n c5">1</span><span class="txt">
+        <b><code>delete_dataset</code> is not on the allowlist, so it is never dispatched.</b> There
+        is no code path from the model's output to an unlisted action — the name is checked against
+        the permitted set before anything is called.
+      </span></li>
+      <li><span class="n c2">2</span><span class="txt">
+        <b>The agent recovers and completes correctly.</b> A refusal does not have to mean a failed
+        run; it adapts and performs the legitimate remediation.
+      </span></li>
+      <li><span class="n c3">3</span><span class="txt">
+        <b>Attempted versus dispatched are counted separately.</b> Eight actions requested, seven
+        executed. The discrepancy is the point, so it is visible rather than silently dropped.
+      </span></li>
+      <li><span class="n c1">4</span><span class="txt">
+        <b>Adding a capability is a code change and a review</b>, not a prompt edit. That is the
+        property that makes the allowlist worth having at all.
+      </span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section id="native">
+  <h2><span class="num">D</span> What Foundry provides, and what we wrote</h2>
+  <p class="lede">
+    Almost every component is a platform feature. The exception is worth understanding, because it
+    is the part that encodes <em>your</em> operating rules.
+  </p>
+
+  <table>
+    <thead>
+      <tr><th>Component</th><th>Provided by</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Agent hosting, versioning, identity</td><td class="yes">Foundry</td>
+          <td>Each agent gets its own managed identity and version history.</td></tr>
+      <tr><td>Model serving</td><td class="yes">Foundry</td>
+          <td>gpt-5.6-luna, Global Standard, Entra auth — API keys disabled.</td></tr>
+      <tr><td>Agent-to-agent handoff</td><td class="yes">Foundry</td>
+          <td>The triage agent invokes the data quality agent as a distinct, separately versioned agent.</td></tr>
+      <tr><td>Content safety / prompt injection</td><td class="yes">Foundry</td>
+          <td>Guardrails, incl. indirect-attack detection, applied to the deployment.</td></tr>
+      <tr><td>Tracing, token and cost accounting</td><td class="yes">Foundry</td>
+          <td>Via a connected Application Insights resource.</td></tr>
+      <tr><td>Evaluations</td><td class="yes">Foundry</td>
+          <td>Available on the agent; not yet wired in this build.</td></tr>
+      <tr><td>Scheduled / event triggers</td><td class="partial">Foundry (Routines, preview)</td>
+          <td>Not yet wired — see limitations.</td></tr>
+      <tr><td><b>Action budgets and allowlist</b></td><td class="no">We wrote this</td>
+          <td><b>Nothing native does it</b>, and Microsoft's own guidance says enforcement belongs in your code.</td></tr>
+      <tr><td>Failure signatures and dedup</td><td class="no">We wrote this</td>
+          <td>Business logic: what counts as “the same failure”.</td></tr>
+      <tr><td>Deterministic duplicate scan</td><td class="no">We wrote this</td>
+          <td>Deliberately not a model call.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <span class="label">The distinction that matters</span>
+    <b>Guardrails decide what may be said. The policy ledger decides what may be done.</b>
+    Foundry ships the first and — correctly — leaves the second to you, because “one dataset refresh
+    per incident” is a statement about your operations, not about AI safety in general. The
+    documentation is explicit that tool-approval enforcement is the calling application's
+    responsibility.
+  </div>
+
+  <p>
+    That split is a feature, not a shortfall. The platform handles the parts that are the same for
+    everyone; the small amount of code we wrote is the part that is specific to how this
+    organisation wants its BI estate treated.
+  </p>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section id="limits">
+  <h2><span class="num">E</span> Limitations, honestly</h2>
+  <p class="lede">
+    What this build does not do, and what we would want to resolve before anyone depended on it.
+  </p>
+
+  <h3>Not yet wired</h3>
+  <table>
+    <thead><tr><th>Item</th><th>Status</th><th>Why it matters</th></tr></thead>
+    <tbody>
+      <tr><td>Routine trigger</td><td class="partial">Deferred</td>
+          <td>Runs are currently started explicitly. Foundry Routines (preview) provide scheduled and
+              event triggers; wiring it is small, but it is not done.</td></tr>
+      <tr><td>Live mailbox ingestion</td><td class="partial">Built, not connected</td>
+          <td>App-only Graph <code>Mail.Read</code> is implemented and was verified against a work
+              tenant. This walkthrough ran from fixed sample messages so the results are reproducible.</td></tr>
+      <tr><td>Live Power BI refresh</td><td class="partial">Built, not connected</td>
+          <td>The refresh client exists; these runs used a mock so the demo does not depend on a
+              dataset being in a particular state.</td></tr>
+      <tr><td>Traces from API-driven runs</td><td class="partial">Ingestion lag</td>
+          <td>App Insights is connected and the trace surface is live, but entries had not appeared
+              at capture time. Verify before relying on it in a session.</td></tr>
+      <tr><td>Human-in-the-loop approval</td><td class="no">Out of scope</td>
+          <td>The branch where an agent proposes a fix and waits for a person. Arguably the most
+              valuable next step — most real failures are not safe to fix automatically.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Things to know before production</h3>
+
+  <div class="note danger">
+    <span class="label">Mailbox permission scope</span>
+    App-only <code>Mail.Read</code> is <b>tenant-wide by default</b>. We verified this directly: an
+    app registration created to read one demo mailbox was able to read the global administrator's
+    inbox. It must be constrained with an Exchange <code>ApplicationAccessPolicy</code> scoped to the
+    single alerts mailbox. Unscoped, “an agent that reads the BI alerts inbox” is an agent that can
+    read every mailbox in the organisation.
+  </div>
+
+  <div class="note warn">
+    <span class="label">Posting to Teams is deliberately harder than reading mail</span>
+    Graph restricts app-only channel posting to migration scenarios, so an unattended agent cannot
+    post as itself. Reading a mailbox unattended is straightforward; writing into a human
+    conversation is not. The demo uses a Power Automate Workflows webhook — note that the older
+    Office 365 connector webhooks were retired in May 2026 — and a bot is the production answer.
+  </div>
+
+  <div class="note warn">
+    <span class="label">Preview surface and API churn</span>
+    Routines, agent-to-agent tooling and several adjacent features are in preview. During this build
+    two breaking API details surfaced within a single afternoon: one route rejects a query-string
+    API version in favour of a path segment, and an <code>agent</code> property was replaced by
+    <code>agent_reference</code>. Pin versions and re-verify before any session that matters.
+  </div>
+
+  <div class="note">
+    <span class="label">Effort, for calibration</span>
+    The agents were roughly a day. The surrounding work — identity, permissions, provisioning, the
+    trigger — was most of the effort. That is the opposite of what most people expect, and it is the
+    most useful thing to take from this document. A production-grade equivalent is weeks, and most of
+    those weeks are not agent work: per-tenant budgets, secret handling at every boundary, a durable
+    incident store, alerting, replay-based regression testing, and the human-approval branch above.
+  </div>
+</section>
+
+<footer>
+  Captured 27 August 2026 against Foundry project <code>bi-request-triage</code>
+  (<code>bitriage-foundry-eus</code>, East US) on <code>gpt-5.6-luna</code>.
+  All five scenarios passed against the live service; 122 tests pass offline with no tenant.
+  Sample data is synthetic.
+</footer>
+
+</div>
+</body>
+</html>
