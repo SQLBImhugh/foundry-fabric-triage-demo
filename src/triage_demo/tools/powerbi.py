@@ -43,6 +43,9 @@ class PowerBIClient(Protocol):
     async def get_refresh_history(
         self, workspace_id: str, dataset_id: str, top: int = 5
     ) -> list[dict[str, Any]]: ...
+    async def rebind_gateway(
+        self, workspace_id: str, dataset_id: str, gateway_id: str
+    ) -> RefreshOutcome: ...
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +94,18 @@ class MockPowerBIClient:
     ) -> list[dict[str, Any]]:
         self.calls.append(("get_refresh_history", {"top": top}))
         return self.history[:top]
+
+    async def rebind_gateway(
+        self, workspace_id: str, dataset_id: str, gateway_id: str
+    ) -> RefreshOutcome:
+        self.calls.append(("rebind_gateway", {"gateway_id": gateway_id}))
+        await asyncio.sleep(self.latency_ms / 1000)
+        return RefreshOutcome(
+            status="Completed",
+            request_id=f"mock-rebind-{len(self.calls)}",
+            duration_ms=self.latency_ms,
+            detail=f"Dataset rebound to gateway {gateway_id}.",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -224,3 +239,35 @@ class LivePowerBIClient:
             resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
             resp.raise_for_status()
             return resp.json().get("value", [])
+
+    async def rebind_gateway(
+        self, workspace_id: str, dataset_id: str, gateway_id: str
+    ) -> RefreshOutcome:
+        """Bind the dataset to a different gateway.
+
+        Reached only after a human has approved it — the controller enforces
+        that, not this client. Kept here rather than in the gate so the gate has
+        no idea what it is authorising, which is the correct separation: the
+        gate decides *whether*, the client decides *how*.
+        """
+        import httpx
+
+        started = time.time()
+        token = await self._get_token()
+        url = f"{_API}/groups/{workspace_id}/datasets/{dataset_id}/Default.BindToGateway"
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                json={"gatewayObjectId": gateway_id},
+            )
+            ok = resp.status_code in (200, 202)
+            return RefreshOutcome(
+                status="Completed" if ok else "Failed",
+                duration_ms=int((time.time() - started) * 1000),
+                detail=(
+                    f"Dataset rebound to gateway {gateway_id}."
+                    if ok
+                    else f"HTTP {resp.status_code}: {resp.text[:400]}"
+                ),
+            )

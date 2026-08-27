@@ -367,6 +367,10 @@ MIN_TURN_HEADROOM = 3
         "scenario2b-known-issue",
         "scenario3-policy-block",
         "scenario4-unknown-action",
+
+        "scenario5-approval-granted",
+
+        "scenario6-approval-denied",
     ],
 )
 async def test_scenarios_keep_turn_headroom(scenario_name, repo_root, runner) -> None:
@@ -452,6 +456,8 @@ async def test_scenarios_run_back_to_back_without_cross_contamination(
         "scenario2-data-quality",
         "scenario3-policy-block",
         "scenario4-unknown-action",
+        "scenario5-approval-granted",
+        "scenario6-approval-denied",
     ]
     outcomes: dict[str, str] = {}
     for name in order:
@@ -464,6 +470,11 @@ async def test_scenarios_run_back_to_back_without_cross_contamination(
         "scenario2-data-quality": "flagged_data_quality",
         "scenario3-policy-block": "needs_human",
         "scenario4-unknown-action": "resolved",
+        # 5 and 6 share an email deliberately: the same failure, two different
+        # human decisions. 6 must NOT be suppressed as a duplicate of 5, because
+        # 5 resolved it - a resolved incident stops suppressing.
+        "scenario5-approval-granted": "resolved",
+        "scenario6-approval-denied": "approval_denied",
     }, f"cross-contamination between scenarios: {outcomes}"
 
     # And the queue the presenter shows in section 6 still holds the refusal.

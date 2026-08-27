@@ -201,6 +201,96 @@ class ScriptedProvider:
                 "Attempting an action outside the allowlist.",
             )
 
+        # A REPEATING failure is a different problem. Another refresh will not
+        # help - the same thing will happen again. The right move is a fix with
+        # a wider blast radius, which means asking a human first.
+        history = results.get("get_dataset_refresh_history", {}).get("history", []) or []
+        failures = [h for h in history if str(h.get("status")) == "Failed"]
+        repeating = len(failures) >= 2
+
+        if repeating:
+            rebind = results.get("rebind_dataset_gateway", {})
+            if "rebind_dataset_gateway" not in called:
+                return (
+                    "rebind_dataset_gateway",
+                    {
+                        "target_gateway": "gw-onprem-02",
+                        "justification": (
+                            f"{len(failures)} consecutive refreshes failed on the same "
+                            "gateway, so retrying will reproduce the failure. Rebinding "
+                            "to the standby gateway is the smallest fix that could work."
+                        ),
+                    },
+                    "Proposing a gateway rebind. This needs a human decision.",
+                )
+
+            approved = bool(rebind.get("succeeded"))
+            if "notify_teams" not in called:
+                return (
+                    "notify_teams",
+                    {
+                        "title": (
+                            "Gateway rebind applied" if approved else "Gateway rebind not approved"
+                        ),
+                        "outcome": "resolved" if approved else "approval_denied",
+                        "action_taken": (
+                            "Rebound the dataset to the standby gateway after approval."
+                            if approved
+                            else "None. The proposed fix was not authorised."
+                        ),
+                        "detail": str(rebind.get("reason") or rebind.get("detail") or ""),
+                    },
+                    "Reporting the outcome of the approval.",
+                )
+
+            if approved:
+                return (
+                    "report_resolution",
+                    {
+                        "outcome": "resolved",
+                        "tier": "tier_2",
+                        "category": "config",
+                        "severity": "medium",
+                        "root_cause": (
+                            "Repeated refresh failures against a single data gateway."
+                        ),
+                        "summary": (
+                            "Diagnosed a repeating gateway failure, proposed a rebind, and "
+                            "applied it once a human approved."
+                        ),
+                        "reasoning": [
+                            "Refresh history showed the same failure repeating.",
+                            "A further retry would reproduce it.",
+                            "A rebind affects other datasets, so it required approval.",
+                            "Approval was granted and the rebind completed.",
+                        ],
+                    },
+                    "Reporting an approved, applied fix.",
+                )
+
+            return (
+                "report_resolution",
+                {
+                    "outcome": "approval_denied",
+                    "tier": "tier_2",
+                    "category": "config",
+                    "severity": "medium",
+                    "root_cause": (
+                        "Repeated refresh failures against a single data gateway."
+                    ),
+                    "summary": (
+                        "Diagnosed a repeating gateway failure and proposed a rebind. "
+                        "A human declined, so nothing was changed."
+                    ),
+                    "reasoning": [
+                        "Refresh history showed the same failure repeating.",
+                        "The proposed fix required human authorisation.",
+                        "Authorisation was not given, so no action was taken.",
+                    ],
+                },
+                "Reporting a declined proposal.",
+            )
+
         refresh_count = counts.get("refresh_powerbi_dataset", 0)
         if refresh_count == 0:
             return (

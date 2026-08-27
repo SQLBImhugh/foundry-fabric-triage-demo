@@ -24,6 +24,21 @@ from typing import Literal
 REMEDIATION_ACTIONS: frozenset[str] = frozenset(
     {
         "refresh_powerbi_dataset",
+        "rebind_dataset_gateway",
+    }
+)
+
+# Remediations a human must authorise before dispatch, however confident the
+# agent is. These are actions whose blast radius extends beyond the thing being
+# fixed: rebinding a gateway affects every dataset bound to it, so the decision
+# belongs to someone who knows what else is on it.
+#
+# Membership here is a code change and a review. That is the point — it is the
+# difference between "the agent was told to ask" and "the agent cannot proceed
+# without an answer".
+APPROVAL_REQUIRED_ACTIONS: frozenset[str] = frozenset(
+    {
+        "rebind_dataset_gateway",
     }
 )
 
@@ -56,6 +71,7 @@ ViolationKind = Literal[
     "budget_exceeded",
     "timed_out",
     "policy_blocked",
+    "approval_denied",
 ]
 
 
@@ -128,6 +144,8 @@ class PolicyLedger:
         self.write_actions = 0
         self.tokens_used = 0
         self.blocked_attempts: list[str] = []
+        #: Actions a human explicitly declined, or that no human answered.
+        self.denied_actions: list[str] = []
 
     # --- introspection -----------------------------------------------------
 
@@ -148,6 +166,7 @@ class PolicyLedger:
             "tokens_used": self.tokens_used,
             "elapsed_ms": self.elapsed_ms,
             "blocked_attempts": list(self.blocked_attempts),
+            "denied_actions": list(self.denied_actions),
         }
 
     # --- charges -----------------------------------------------------------
@@ -187,7 +206,15 @@ class PolicyLedger:
                 f"Allowed: {sorted(self.policy.allowed_actions)}",
             )
 
-    def charge_tool_call(self, action: str) -> None:
+    def charge_tool_call(self, action: str, *, defer_write: bool = False) -> None:
+        """Charge a dispatch against the budgets.
+
+        ``defer_write`` skips the remediation charge, for actions that must be
+        approved first. A human declining a proposal must not cost the run its
+        one remediation — otherwise a denial silently disarms the agent for the
+        rest of the incident, and the next legitimate fix is refused for a
+        reason nobody can see. Call :meth:`charge_write` once approval lands.
+        """
         # Attempts are counted before any check, so "the agent asked for 8
         # things and 7 were dispatched" is answerable. Counting only what was
         # dispatched hides the refusals, which are the interesting part.
@@ -202,17 +229,29 @@ class PolicyLedger:
             )
         self.tool_calls += 1
 
-        if action in REMEDIATION_ACTIONS:
-            if self.write_actions >= self.policy.max_write_actions:
-                self.blocked_attempts.append(action)
-                raise PolicyViolation(
-                    "policy_blocked",
-                    f"Refusing '{action}': already performed "
-                    f"{self.write_actions} remediation write(s), "
-                    f"max_write_actions={self.policy.max_write_actions}",
-                )
-            self.write_actions += 1
+        if action in REMEDIATION_ACTIONS and not defer_write:
+            self.charge_write(action)
+
+    def charge_write(self, action: str) -> None:
+        """Consume one unit of the remediation budget."""
+        if self.write_actions >= self.policy.max_write_actions:
+            self.blocked_attempts.append(action)
+            raise PolicyViolation(
+                "policy_blocked",
+                f"Refusing '{action}': already performed "
+                f"{self.write_actions} remediation write(s), "
+                f"max_write_actions={self.policy.max_write_actions}",
+            )
+        self.write_actions += 1
+
+    def record_approval_denied(self, action: str) -> None:
+        """A human said no. Audited, but it costs no remediation budget."""
+        self.denied_actions.append(action)
 
 
 def is_remediation(action: str) -> bool:
     return action in REMEDIATION_ACTIONS
+
+
+def requires_approval(action: str) -> bool:
+    return action in APPROVAL_REQUIRED_ACTIONS

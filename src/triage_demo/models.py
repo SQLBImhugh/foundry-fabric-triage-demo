@@ -19,6 +19,7 @@ TerminalOutcome = Literal[
     "resolved",              # Tier 1, remediation applied, verified
     "flagged_data_quality",  # DQ issue found; flagged + notified, no auto-fix
     "duplicate_suppressed",  # known open incident; occurrence counted, no action
+    "approval_denied",       # agent proposed a bounded fix; a human said no
     "needs_human",           # agent stopped without resolving (no crash)
     "declared_failed",       # agent explicitly declared it unresolvable
     "agent_crashed",         # unhandled exception in the loop
@@ -152,6 +153,28 @@ class TriageClassification(BaseModel):
     confidence: float = 0.0
 
 
+class ApprovalRecord(BaseModel):
+    """What was asked of a human, and what they said.
+
+    Persisted on the result and the incident. A denial is the highest-signal
+    event in the whole system: the agent proposed something a person judged
+    wrong, which is precisely the input you want when deciding what to automate
+    next — and what never to.
+    """
+
+    action: str
+    fingerprint: str
+    requested_at: str
+    justification: str = ""
+    impact: str = ""
+    granted: bool = False
+    outcome: str = "granted"  # granted | denied | timed_out | error
+    decided_by: str = ""
+    decided_at: str = ""
+    reason: str = ""
+    waited_ms: int = 0
+
+
 class TriageAction(BaseModel):
     """One tool call executed during a run — the audit trail."""
 
@@ -179,6 +202,7 @@ class TriageResult(BaseModel):
     dq_finding: DataQualityFinding | None = None
 
     actions: list[TriageAction] = Field(default_factory=list)
+    approvals: list[ApprovalRecord] = Field(default_factory=list)
     llm_turns: int = 0
     tool_calls: int = 0
     write_actions: int = 0
@@ -186,6 +210,7 @@ class TriageResult(BaseModel):
     tokens_used: int = 0
     wall_clock_ms: int = 0
     blocked_attempts: list[str] = Field(default_factory=list)
+    denied_actions: list[str] = Field(default_factory=list)
 
     # A remediation that worked but was never reported is still an operational
     # failure — the human who needed to know was not told. It does not change

@@ -44,6 +44,9 @@ class Expectation:
     flags_written: int | None = None
     dq_has_issue: bool | None = None
     blocked_attempts: int | None = None
+    approval_requested: bool | None = None
+    approval_granted: bool | None = None
+    denied_actions: int | None = None
 
 
 @dataclass
@@ -57,6 +60,10 @@ class Scenario:
     dataset_id: str = "00000000-0000-0000-0000-000000000000"
     refresh_result: str = "Completed"
     refresh_history: list[dict[str, Any]] = field(default_factory=list)
+    #: auto_approve | auto_deny | timeout | none
+    approval: str = "auto_approve"
+    approver: str = "m.hughes@contoso.com"
+    approval_reason: str = ""
     rogue_second_refresh: bool = False
     rogue_unknown_action: bool = False
     reset_flags: bool = True
@@ -71,12 +78,16 @@ class Scenario:
         expect = Expectation(**(raw.pop("expect", None) or {}))
         pbi = raw.pop("powerbi", None) or {}
         provider = raw.pop("provider", None) or {}
+        approval = raw.pop("approval", None) or {}
         return cls(
             expect=expect,
             workspace_id=pbi.get("workspace_id", cls.workspace_id),
             dataset_id=pbi.get("dataset_id", cls.dataset_id),
             refresh_result=pbi.get("refresh_result", "Completed"),
             refresh_history=list(pbi.get("refresh_history") or []),
+            approval=approval.get("mode", "auto_approve"),
+            approver=approval.get("approver", "m.hughes@contoso.com"),
+            approval_reason=approval.get("reason", ""),
             rogue_second_refresh=bool(provider.get("rogue_second_refresh", False)),
             rogue_unknown_action=bool(provider.get("rogue_unknown_action", False)),
             **raw,
@@ -141,6 +152,28 @@ class TriageRunner:
             refresh_result=(scenario.refresh_result if scenario else "Completed"),
             history=list(scenario.refresh_history) if scenario else [],
         )
+
+    def build_approval_gate(self, scenario: Scenario | None):
+        """Choose the approval channel for this run.
+
+        ``none`` is a real, testable configuration, not an oversight: an
+        approval-required action with nowhere to send the request must be
+        refused rather than quietly executed.
+        """
+        from triage_demo.approvals import AutoApproveGate, AutoDenyGate, TimeoutGate
+
+        mode = scenario.approval if scenario else "auto_approve"
+        if mode == "none":
+            return None
+        if mode == "auto_deny":
+            return AutoDenyGate(
+                approver=scenario.approver if scenario else "",
+                reason=(scenario.approval_reason if scenario and scenario.approval_reason
+                        else "Declined."),
+            )
+        if mode == "timeout":
+            return TimeoutGate()
+        return AutoApproveGate(approver=scenario.approver if scenario else "")
 
     def build_teams(self):
         if self.settings.triage_tool_mode == "live" and self.settings.teams_webhook_url:
@@ -242,6 +275,7 @@ class TriageRunner:
             dataset_id=(scenario.dataset_id if scenario else "") or "",
             signature=signature,
             known_incident=known,
+            approval_gate=self.build_approval_gate(scenario),
         )
 
         flags_before = self.flag_table.row_count
@@ -304,6 +338,25 @@ def check_expectations(scenario: Scenario, artifacts: RunArtifacts) -> list[str]
             failures.append(
                 f"blocked_attempts: expected {expect.blocked_attempts}, got {blocked}"
             )
+
+    if expect.approval_requested is not None:
+        requested = bool(result.approvals)
+        if requested != expect.approval_requested:
+            failures.append(
+                f"approval_requested: expected {expect.approval_requested}, got {requested}"
+            )
+
+    if expect.approval_granted is not None:
+        granted = any(a.granted for a in result.approvals)
+        if granted != expect.approval_granted:
+            failures.append(
+                f"approval_granted: expected {expect.approval_granted}, got {granted}"
+            )
+
+    if expect.denied_actions is not None:
+        denied = len(result.denied_actions)
+        if denied != expect.denied_actions:
+            failures.append(f"denied_actions: expected {expect.denied_actions}, got {denied}")
 
     return failures
 

@@ -21,9 +21,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from triage_demo.models import BIRequest, DataQualityFinding, TriageAction
+from triage_demo.approvals import ApprovalGate, ApprovalRequest
+from triage_demo.models import ApprovalRecord, BIRequest, DataQualityFinding, TriageAction
 from triage_demo.observability import tool_span
-from triage_demo.policy import PolicyLedger, PolicyViolation, is_remediation
+from triage_demo.policy import (
+    PolicyLedger,
+    PolicyViolation,
+    is_remediation,
+    requires_approval,
+)
 from triage_demo.tools.dataset import DatasetSource
 from triage_demo.tools.flags import DataQualityFlagTable, build_flag
 from triage_demo.tools.powerbi import PowerBIClient
@@ -127,6 +133,36 @@ TRIAGE_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "rebind_dataset_gateway",
+            "description": (
+                "REMEDIATION REQUIRING HUMAN APPROVAL. Rebind the dataset to a "
+                "different data gateway. Use only when refresh history shows the "
+                "SAME failure repeating, so another refresh will not help. This "
+                "affects every dataset bound to the gateway, not just this one, "
+                "so a human must authorise it before it runs. Propose it, explain "
+                "why, and accept the answer."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target_gateway": {
+                        "type": "string",
+                        "description": "Name or id of the gateway to bind to.",
+                    },
+                    "justification": {
+                        "type": "string",
+                        "description": (
+                            "Why a rebind is the right call, citing the refresh history."
+                        ),
+                    },
+                },
+                "required": ["target_gateway", "justification"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "write_data_quality_flag",
             "description": (
                 "Record a data quality issue in the flag table. Flags the affected "
@@ -178,6 +214,7 @@ TRIAGE_TOOLS: list[dict[str, Any]] = [
                             "resolved",
                             "flagged_data_quality",
                             "duplicate_suppressed",
+                            "approval_denied",
                             "needs_human",
                             "declared_failed",
                         ],
@@ -252,6 +289,9 @@ class ToolContext:
 
     workspace_id: str = ""
     dataset_id: str = ""
+    approval_gate: ApprovalGate | None = None
+    approvals: list[ApprovalRecord] = field(default_factory=list)
+    gateway_rebound_to: str = ""
 
     def default_dataset(self) -> DatasetSource | None:
         return next(iter(self.datasets.values()), None)
@@ -267,9 +307,14 @@ class ToolDispatcher:
 
     async def dispatch(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         started = time.monotonic()
+        gated = requires_approval(name)
 
         try:
-            self.ctx.ledger.charge_tool_call(name)
+            # Gated actions defer the remediation charge until a human has
+            # actually said yes. A denial must not spend the run's one
+            # remediation, or the next legitimate fix gets refused for a reason
+            # nobody can see.
+            self.ctx.ledger.charge_tool_call(name, defer_write=gated)
         except PolicyViolation as violation:
             if violation.kind == "policy_blocked":
                 # Surface the refusal to the model instead of ending the run.
@@ -288,6 +333,30 @@ class ToolDispatcher:
                 }
             raise
 
+        if gated:
+            allowed, approval_result = await self._seek_approval(name, arguments)
+            if not allowed:
+                self._record(
+                    name,
+                    arguments,
+                    f"NOT APPROVED: {approval_result.get('reason', '')}",
+                    started,
+                    blocked=True,
+                )
+                return approval_result
+            try:
+                self.ctx.ledger.charge_write(name)
+            except PolicyViolation as violation:
+                self._record(name, arguments, f"BLOCKED: {violation.message}", started, blocked=True)
+                return {
+                    "status": "blocked_by_policy",
+                    "reason": violation.message,
+                    "guidance": (
+                        "Approval was granted but the remediation budget is spent. "
+                        "Notify a human and report 'needs_human'."
+                    ),
+                }
+
         with tool_span(name):
             try:
                 result = await self._execute(name, arguments)
@@ -299,6 +368,96 @@ class ToolDispatcher:
 
         self._record(name, arguments, _summarize(result), started)
         return result
+
+    # --- human approval ----------------------------------------------------
+
+    async def _seek_approval(
+        self, name: str, arguments: dict[str, Any]
+    ) -> tuple[bool, dict[str, Any]]:
+        """Ask a human. Return (allowed, result_to_return_if_not_allowed).
+
+        Every path that is not an explicit, matching, unexpired, unused "yes"
+        returns False. That includes the absence of a gate entirely: an
+        approval-required action with nowhere to send the request is not
+        approved, it is unapprovable.
+        """
+        ctx = self.ctx
+        gate = ctx.approval_gate
+        started = time.monotonic()
+
+        request = ApprovalRequest(
+            action=name,
+            arguments=dict(arguments or {}),
+            justification=str(arguments.get("justification", "")),
+            request_id=f"{ctx.request.request_id}:{name}",
+            report_name=ctx.request.report_name or "",
+            signature=ctx.signature,
+            impact=_impact_of(name, arguments),
+        )
+
+        if gate is None:
+            logger.warning("No approval gate configured; refusing '%s'", name)
+            record = ApprovalRecord(
+                action=name,
+                fingerprint=request.fingerprint,
+                requested_at=request.requested_at.isoformat(),
+                justification=request.justification,
+                impact=request.impact,
+                granted=False,
+                outcome="error",
+                reason="No approval channel is configured.",
+            )
+            ctx.approvals.append(record)
+            ctx.ledger.record_approval_denied(name)
+            return False, {
+                "status": "approval_unavailable",
+                "reason": record.reason,
+                "guidance": (
+                    "This action requires human approval and no approval channel "
+                    "exists. Notify a human and report 'needs_human'."
+                ),
+            }
+
+        decision = await gate.request_approval(request)
+        waited_ms = int((time.monotonic() - started) * 1000)
+
+        valid, why = decision.is_valid_for(request)
+        if valid and hasattr(gate, "consume") and not gate.consume(decision):
+            valid, why = False, "approval already used"
+
+        record = ApprovalRecord(
+            action=name,
+            fingerprint=request.fingerprint,
+            requested_at=request.requested_at.isoformat(),
+            justification=request.justification,
+            impact=request.impact,
+            granted=bool(valid),
+            outcome=decision.outcome if valid else (decision.outcome or "denied"),
+            decided_by=decision.decided_by,
+            decided_at=decision.decided_at.isoformat(),
+            reason=decision.reason or why,
+            waited_ms=waited_ms,
+        )
+        ctx.approvals.append(record)
+
+        if valid:
+            logger.info("Approval granted for %s by %s", name, decision.decided_by or "unknown")
+            return True, {}
+
+        ctx.ledger.record_approval_denied(name)
+        logger.info("Approval not granted for %s: %s", name, record.reason)
+        return False, {
+            "status": "not_approved",
+            "outcome": record.outcome,
+            "decided_by": record.decided_by,
+            "reason": record.reason,
+            "guidance": (
+                "A human did not authorise this action, so it was not performed. "
+                "Do not attempt it again and do not look for another route to the "
+                "same effect. Notify the requester and call report_resolution with "
+                "outcome 'approval_denied'."
+            ),
+        }
 
     # --- individual tools --------------------------------------------------
 
@@ -364,6 +523,22 @@ class ToolDispatcher:
                 "succeeded": outcome.succeeded,
                 "request_id": outcome.request_id,
                 "duration_ms": outcome.duration_ms,
+                "detail": outcome.detail,
+            }
+
+        if name == "rebind_dataset_gateway":
+            target = str(args.get("target_gateway") or "").strip()
+            if not target:
+                return {"status": "refused", "reason": "No target gateway supplied."}
+            outcome = await ctx.powerbi.rebind_gateway(
+                ctx.workspace_id, ctx.dataset_id, target
+            )
+            ctx.remediation_outcome = outcome
+            ctx.gateway_rebound_to = target
+            return {
+                "status": outcome.status,
+                "succeeded": outcome.succeeded,
+                "target_gateway": target,
                 "detail": outcome.detail,
             }
 
@@ -442,6 +617,21 @@ class ToolDispatcher:
                 blocked=blocked,
             )
         )
+
+
+def _impact_of(action: str, arguments: dict[str, Any]) -> str:
+    """Plain-language blast radius, shown to whoever is asked to approve.
+
+    An approval request that does not state the consequence is a rubber stamp
+    with extra steps.
+    """
+    if action == "rebind_dataset_gateway":
+        target = arguments.get("target_gateway", "the target gateway")
+        return (
+            f"Repoints this dataset to {target}. Other datasets bound to either "
+            "gateway may be affected, and in-flight refreshes will fail."
+        )
+    return "Modifies the live BI environment."
 
 
 def _facts_for(ctx: ToolContext) -> dict[str, str]:

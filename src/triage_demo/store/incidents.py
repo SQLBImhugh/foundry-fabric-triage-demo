@@ -34,6 +34,7 @@ logger = logging.getLogger("triage.store")
 # than a crash or a policy block.
 _ACTION_TYPES: dict[str, str] = {
     "refresh_powerbi_dataset": "nondeterministic_retry",
+    "rebind_dataset_gateway": "known_workaround",
     "write_data_quality_flag": "flag_only",
     "": "none",
 }
@@ -50,6 +51,10 @@ _INVESTIGATE_OUTCOMES = frozenset(
         # so it belongs in the investigate queue rather than out of it.
         "needs_human",
         "declared_failed",
+        # A denial is the highest-signal event of all: the agent proposed
+        # something a person judged wrong. That is the input for deciding what
+        # to automate next - and what never to.
+        "approval_denied",
     }
 )
 

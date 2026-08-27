@@ -46,6 +46,7 @@ _VALID_OUTCOMES = {
     "resolved",
     "flagged_data_quality",
     "duplicate_suppressed",
+    "approval_denied",
     "needs_human",
     "declared_failed",
 }
@@ -65,6 +66,7 @@ class TriageDeps:
     dataset_id: str = ""
     signature: str = ""
     known_incident: Any = None
+    approval_gate: Any = None
 
 
 class TriageAgent:
@@ -126,6 +128,7 @@ class TriageAgent:
             signature=deps.signature,
             workspace_id=deps.workspace_id or request.workspace_id or "",
             dataset_id=deps.dataset_id or request.dataset_id or "",
+            approval_gate=deps.approval_gate,
         )
         dispatcher = ToolDispatcher(ctx, dq_agent=self._dq_agent)
 
@@ -292,6 +295,7 @@ class TriageAgent:
             classification=classification,
             dq_finding=ctx.dq_finding,
             actions=dispatcher.actions,
+            approvals=list(ctx.approvals),
             llm_turns=ledger.llm_turns,
             tool_calls=ledger.tool_calls,
             attempted_actions=ledger.attempted_actions,
@@ -299,6 +303,7 @@ class TriageAgent:
             tokens_used=ledger.tokens_used,
             wall_clock_ms=ledger.elapsed_ms,
             blocked_attempts=list(ledger.blocked_attempts),
+            denied_actions=list(ledger.denied_actions),
             notification_failed=notification_failed,
             exception_class=exception_class,
             exception_message=exception_message,
@@ -319,6 +324,18 @@ class TriageAgent:
         happened, never against another thing the agent said.
         """
         if outcome == "resolved":
+            # Check the approval case first: "the fix you proposed was not
+            # authorised" is a far more useful thing to read in the queue than
+            # the generic "no remediation completed".
+            ungranted = [a for a in ctx.approvals if not a.granted]
+            if ungranted and not any(a.granted for a in ctx.approvals):
+                return self._downgrade(
+                    "resolved",
+                    summary,
+                    f"Agent reported success, but the action it proposed was not "
+                    f"approved ({ungranted[-1].outcome}).",
+                )
+
             remediation = ctx.remediation_outcome
             if remediation is None or not getattr(remediation, "succeeded", False):
                 return self._downgrade(
@@ -350,6 +367,23 @@ class TriageAgent:
                 "Agent suppressed the alert as a duplicate, but no open incident "
                 "matched its signature.",
             )
+
+        if outcome == "approval_denied":
+            # Claiming a human declined when nobody was asked would be a
+            # particularly bad lie: it invents authority for inaction.
+            denied = [a for a in ctx.approvals if not a.granted]
+            if not denied:
+                return self._downgrade(
+                    "approval_denied",
+                    summary,
+                    "Agent reported that approval was denied, but no approval was "
+                    "ever requested.",
+                )
+
+        # An approved-and-executed gated remediation is a resolution; an
+        # un-approved one is not, whatever the agent says about it.
+        # (Handled above, before the generic remediation check, so the reason
+        # recorded is the specific one.)
 
         if ledger.blocked_attempts and outcome in ("resolved", "flagged_data_quality"):
             logger.info("Run contained blocked attempts: %s", ledger.blocked_attempts)

@@ -33,6 +33,10 @@ def test_every_scenario_file_parses(repo_root) -> None:
         "scenario2b-known-issue",
         "scenario3-policy-block",
         "scenario4-unknown-action",
+
+        "scenario5-approval-granted",
+
+        "scenario6-approval-denied",
     ],
 )
 async def test_scenario_meets_its_expectations(

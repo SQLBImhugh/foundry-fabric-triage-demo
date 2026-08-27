@@ -43,6 +43,7 @@ SCENARIO_DIR = REPO_ROOT / "scenarios"
 _TOOL_STYLE = {
     "consult_data_quality_agent": "bold magenta",
     "refresh_powerbi_dataset": "bold yellow",
+    "rebind_dataset_gateway": "bold red",
     "write_data_quality_flag": "bold cyan",
     "notify_teams": "bold blue",
     "report_resolution": "bold green",
@@ -53,6 +54,7 @@ _OUTCOME_STYLE = {
     "resolved": "bold green",
     "flagged_data_quality": "bold cyan",
     "duplicate_suppressed": "bold yellow",
+    "approval_denied": "bold yellow",
     "needs_human": "bold yellow",
     "declared_failed": "bold red",
     "agent_crashed": "bold red",
@@ -160,7 +162,28 @@ def _render_result(artifacts: RunArtifacts) -> None:
         budget.add_row(
             "[red]Blocked attempts[/red]", f"[red]{', '.join(result.blocked_attempts)}[/red]"
         )
+    if result.denied_actions:
+        budget.add_row(
+            "[yellow]Not approved[/yellow]", f"[yellow]{', '.join(result.denied_actions)}[/yellow]"
+        )
     console.print(budget)
+
+    for ap in result.approvals:
+        style = "green" if ap.granted else "yellow"
+        verdict = "APPROVED" if ap.granted else f"NOT APPROVED ({ap.outcome})"
+        console.print(
+            Panel(
+                f"[bold {style}]{verdict}[/bold {style}]\n\n"
+                f"[dim]action[/dim]      {ap.action}\n"
+                f"[dim]fingerprint[/dim] {ap.fingerprint}\n"
+                f"[dim]impact[/dim]      {ap.impact}\n"
+                f"[dim]decided by[/dim]  {ap.decided_by or '(nobody)'}\n"
+                f"[dim]reason[/dim]      {ap.reason}\n"
+                f"[dim]waited[/dim]      {ap.waited_ms} ms",
+                title="Human approval",
+                border_style=style,
+            )
+        )
 
     trail = Table(title="Audit trail", show_header=True, header_style="bold")
     trail.add_column("#", justify="right", width=3)
