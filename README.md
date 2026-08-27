@@ -31,9 +31,17 @@ asked for. The second half is the part that decides whether they trust it:
 | `scenario2-data-quality` | Duplicates found → flagged + notified → **no automated fix** |
 | `scenario2b-known-issue` | Same alert twice → second one suppressed, occurrence counted |
 | `scenario3-policy-block` | Agent tries a second remediation → **controller refuses** |
-| `scenario4-unknown-action` | Agent proposes an unlisted action → **never dispatched**, agent recovers |
+| `scenario4-unknown-action` | Agent proposes an unlisted action → **never dispatched** |
+| `scenario5-approval-granted` | Repeating failure → agent proposes a bigger fix → **human approves** → applied |
+| `scenario6-approval-denied` | Same, but the **human declines** → nothing happens, and that is the correct ending |
 
-Scenarios 3 and 4 are the ones worth building the conversation around.
+Scenarios 3 through 6 are the ones worth building the conversation around.
+
+**Human-in-the-loop is the branch that makes this generalise.** Most real
+failures are not safe to fix automatically. An agent that investigates, proposes
+a bounded fix and *stops* turns one investigation into one decision — see
+`src/triage_demo/approvals.py`, where every path that is not an explicit,
+matching, unexpired, unused "yes" is a no.
 
 ## Design decisions that carry the weight
 
@@ -72,6 +80,7 @@ triggering a second fix.
 ```
 src/triage_demo/
   policy.py            TriagePolicy + PolicyLedger      <- the safety story
+  approvals.py         Human-in-the-loop gates          <- fail-closed by design
   signature.py         Failure signatures for dedup
   redaction.py         11 secret patterns, applied at the store boundary
   models.py            Typed contracts for every agent boundary
@@ -96,11 +105,11 @@ src/triage_demo/
     foundry.py         Foundry agents, both handoff shapes
   store/incidents.py   Dedup, occurrence counting, redaction
 
-scenarios/*.yaml       Five runnable scenarios with assertions
+scenarios/*.yaml       Seven runnable scenarios with assertions
 mock/                  Seeded data + four inbox messages
 scripts/               Foundry agent registration
 docs/                  Plan, architecture, run sheet, FAQ, provisioning
-tests/                 122 tests, all offline
+tests/                 201 tests, all offline
                        test_hardening.py pins the post-review fixes
 ```
 
@@ -149,7 +158,7 @@ python scripts\register_foundry_agents.py --dry-run
 ## Tests
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 122 tests, no network
+.\.venv\Scripts\python.exe -m pytest -q      # 201 tests, no network
 .\.venv\Scripts\python.exe -m ruff check .
 ```
 

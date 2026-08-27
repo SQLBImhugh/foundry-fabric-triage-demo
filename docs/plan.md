@@ -1,6 +1,6 @@
 # Build plan — BI Request Triage & Resolution demo
 
-**Status**: Phase 1 complete (offline demo runs end to end, 122 tests green).
+**Status**: Phase 1 complete (offline demo runs end to end, 201 tests green).
 Phases 2–7 are tenant-dependent and not started.
 
 **Goal**: a live, interactive demo of an agentic BI triage loop on Azure AI
@@ -77,7 +77,7 @@ Everything runs with no tenant, no Azure login, no network.
 | OTel GenAI spans with no-op fallback | `src/triage_demo/observability.py` |
 | 5 scenarios with machine-checked assertions | `scenarios/` |
 | CLI with live event rendering | `src/triage_demo/cli.py` |
-| 122 tests | `tests/` |
+| 201 tests | `tests/` |
 
 **Exit criteria (met)**: all five scenarios pass their assertions offline;
 `ruff check` clean; every scenario produces the same outcome, the same tool

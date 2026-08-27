@@ -386,7 +386,25 @@ class TriageAgent:
         # recorded is the specific one.)
 
         if ledger.blocked_attempts and outcome in ("resolved", "flagged_data_quality"):
-            logger.info("Run contained blocked attempts: %s", ledger.blocked_attempts)
+            # The agent asked for something policy forbade. Even when the run
+            # otherwise succeeded, that divergence is information: either the
+            # fix did not work and the agent knew something the operator does
+            # not, or the agent is over-eager and the prompt needs attention.
+            # Both warrant a human look, so the outcome must not read as "all
+            # clear".
+            #
+            # It also makes the decision the CONTROLLER'S rather than the
+            # model's, which is what keeps mock and live runs in agreement. A
+            # real model will sometimes reason "the first fix worked, so this
+            # is resolved" — defensible, but non-deterministic, and a demo you
+            # cannot rehearse is a demo you should not give.
+            return self._downgrade(
+                outcome,
+                summary,
+                f"Run completed, but the agent attempted "
+                f"{len(ledger.blocked_attempts)} action(s) that policy refused "
+                f"({', '.join(ledger.blocked_attempts)}).",
+            )
 
         return outcome, summary
 

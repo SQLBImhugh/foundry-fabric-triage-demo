@@ -16,7 +16,7 @@ It runs fully offline. Keep it that way.
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 
-.\.venv\Scripts\python.exe -m pytest -q       # 122 tests, must stay offline
+.\.venv\Scripts\python.exe -m pytest -q       # 201 tests, must stay offline
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\triage-demo.exe list
 .\.venv\Scripts\triage-demo.exe run scenario1-transient
@@ -32,14 +32,20 @@ python -m venv .venv
 3. **Every new tool gets an entry in `REMEDIATION_ACTIONS`, `REPORTING_ACTIONS`
    or `DIAGNOSTIC_ACTIONS`.** Anything not on the allowlist is refused before
    dispatch — that is the property the whole demo rests on.
-4. **Deterministic evidence outranks model output.** If a model claim and a
+4. **An approval is only a yes if it is explicit, fingerprint-matched, unexpired
+   and unused.** Everything else — timeout, error, malformed reply, no gate
+   configured — is a no. Silence never reads as consent.
+5. **A denial must not consume the remediation budget.** Otherwise one "no"
+   silently disarms the agent for the rest of the incident.
+6. **Deterministic evidence outranks model output.** If a model claim and a
    scan disagree, the scan wins and the disagreement is logged.
-5. **Redaction stays inside the store boundary.** Do not move it to call sites;
+7. **Redaction stays inside the store boundary.** Do not move it to call sites;
    a call site can forget.
-6. **Every terminal outcome is persisted**, including crashes and refusals.
-7. **Spans carry metadata only.** Never attach prompt or completion content.
-8. **Scenarios are reproducible.** Same input, same tool sequence, same numbers.
-   A demo you cannot rehearse is a demo you should not give.
+8. **Every terminal outcome is persisted**, including crashes and refusals.
+9. **Spans carry metadata only.** Never attach prompt or completion content.
+10. **Scenarios are reproducible.** Same input, same tool sequence, same numbers.
+    A demo you cannot rehearse is a demo you should not give. When a live model
+    and the mock diverge, make the **controller** decide so both agree.
 
 ## Adding things
 

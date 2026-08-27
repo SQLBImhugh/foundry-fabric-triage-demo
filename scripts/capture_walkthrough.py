@@ -32,6 +32,8 @@ RUNS: list[tuple[str, str, bool]] = [
     ("scenario2b-known-issue", "run-3-suppressed", False),
     ("scenario3-policy-block", "run-4-refused", True),
     ("scenario4-unknown-action", "run-5-allowlist", True),
+    ("scenario5-approval-granted", "run-6-approved", True),
+    ("scenario6-approval-denied", "run-7-denied", True),
 ]
 
 

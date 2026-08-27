@@ -134,7 +134,11 @@ async def test_unlisted_action_is_never_dispatched_and_the_agent_recovers(
     artifacts = (await runner.run_scenario(scenario))[-1]
 
     assert artifacts.result.blocked_attempts == ["delete_dataset"]
-    assert artifacts.result.outcome == "resolved"
+    assert artifacts.result.outcome == "needs_human", (
+        "a run containing a refused action must not read as all-clear"
+    )
+    # The legitimate remediation still happened; only the outcome label changed.
+    assert artifacts.result.write_actions == 1
     assert not any("delete" in str(call) for call in artifacts.powerbi_calls)
 
 

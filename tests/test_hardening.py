@@ -469,7 +469,7 @@ async def test_scenarios_run_back_to_back_without_cross_contamination(
         "scenario1-transient": "resolved",
         "scenario2-data-quality": "flagged_data_quality",
         "scenario3-policy-block": "needs_human",
-        "scenario4-unknown-action": "resolved",
+        "scenario4-unknown-action": "needs_human",
         # 5 and 6 share an email deliberately: the same failure, two different
         # human decisions. 6 must NOT be suppressed as a duplicate of 5, because
         # 5 resolved it - a resolved incident stops suppressing.
