@@ -31,6 +31,7 @@ administrator's mailbox.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -153,22 +154,34 @@ class GraphInbox:
         if self._token and time.time() < self._token_expires_at - 60:
             return self._token
 
-        if not self._client_id:
-            raise ValueError("graph_client_id is required for Graph authentication")
-
         if not self._client_secret:
-            # The credential chain supports managed identity and workload
-            # identity federation without putting a rotating secret in the
-            # demo's environment.
-            from azure.identity import DefaultAzureCredential
+            # Credential-free path. This is the production posture: a managed
+            # identity (or an Entra agent identity, which is also just a service
+            # principal) holds the Mail.Read app role, so there is no secret to
+            # store or rotate. That matters under tenant governance that purges
+            # Entra app secrets on a schedule -- a secret-based design starts
+            # failing about a month after go-live.
+            #
+            # Deliberately NOT DefaultAzureCredential: its chain includes the
+            # developer's Azure CLI login, so a missing managed identity would
+            # silently downgrade to a *delegated user* token and the agent would
+            # read mail as whoever last ran `az login`. verify() would catch it
+            # via the 'upn' claim, but a credential chain that can quietly
+            # become a person is the wrong default for an unattended agent.
+            from azure.identity import ManagedIdentityCredential
 
-            token = DefaultAzureCredential().get_token(self._SCOPE)
+            kwargs = {"client_id": self._client_id} if self._client_id else {}
+            credential = ManagedIdentityCredential(**kwargs)
+            token = await asyncio.to_thread(credential.get_token, self._SCOPE)
             self._token = token.token
             try:
                 self._token_expires_at = float(token.expires_on)
             except (AttributeError, TypeError, ValueError):
                 self._token_expires_at = 0.0
             return self._token
+
+        if not self._client_id:
+            raise ValueError("graph_client_id is required for client-secret authentication")
 
         import httpx
 
@@ -273,4 +286,59 @@ class GraphInbox:
             "ok": True,
             "roles": [str(role) for role in roles],
             "has_upn": "upn" in payload,
+        }
+
+    async def verify_scope(self, canary_mailbox: str) -> dict[str, Any]:
+        """Prove the app registration is confined to its mailbox.
+
+        App-only ``Mail.Read`` is **tenant-wide by default**. We verified that
+        directly: an app created to read one demo mailbox happily read the
+        global administrator's inbox. The fix is an Exchange
+        ``ApplicationAccessPolicy`` scoping it to a single mailbox.
+
+        This method proves the scope is in force by attempting to read a mailbox
+        the agent has no business reading. A **403 is the passing result**. A 200
+        means the policy is missing or has not propagated, and the caller should
+        refuse to run rather than quietly ingest from an over-permissioned app.
+
+        Reads only message ids, and never returns message content.
+        """
+        import httpx
+
+        if not canary_mailbox or canary_mailbox.lower() == self._mailbox.lower():
+            return {"checked": False, "reason": "no distinct canary mailbox configured"}
+
+        try:
+            token = await self._get_token()
+            url = (
+                f"{self._BASE}/users/{canary_mailbox}/mailFolders/inbox/messages"
+                f"?$top=1&$select=id"
+            )
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+        except Exception as exc:
+            logger.warning("Scope check could not run (%s)", type(exc).__name__)
+            return {"checked": False, "reason": type(exc).__name__}
+
+        # 403 = the policy denied it, which is what we want. 404 can mean the
+        # mailbox does not exist, which proves nothing either way.
+        if resp.status_code == 403:
+            return {"checked": True, "scoped": True, "canary": canary_mailbox, "status": 403}
+        if resp.status_code == 200:
+            return {
+                "checked": True,
+                "scoped": False,
+                "canary": canary_mailbox,
+                "status": 200,
+                "reason": (
+                    f"The app read {canary_mailbox}, which it should not be able to. "
+                    "Apply an Exchange ApplicationAccessPolicy restricting it to "
+                    f"{self._mailbox}."
+                ),
+            }
+        return {
+            "checked": False,
+            "canary": canary_mailbox,
+            "status": resp.status_code,
+            "reason": f"inconclusive (HTTP {resp.status_code})",
         }

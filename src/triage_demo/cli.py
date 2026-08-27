@@ -407,6 +407,267 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _watch_loop(
+    runner: TriageRunner,
+    inbox,
+    *,
+    once: bool,
+    limit: int,
+    interval: int,
+    live: bool,
+) -> int:
+    """Poll a mailbox and triage each new message.
+
+    Deliberately does **not** mark messages as read. A demo that mutates the
+    customer's mailbox is a demo you can only give once, and read state is the
+    operator's signal, not ours. Dedup is by Graph message id, held by the inbox.
+    """
+    triaged = 0
+    while True:
+        try:
+            requests = await inbox.fetch(limit=limit)
+        except Exception as exc:
+            console.print(f"[red]Fetch failed:[/red] {type(exc).__name__}: {exc}")
+            if once:
+                return 1
+            await asyncio.sleep(interval)
+            continue
+
+        if not requests:
+            if once:
+                console.print("[dim]No new mail.[/dim]")
+                return 0
+            await asyncio.sleep(interval)
+            continue
+
+        for request in requests:
+            console.print(
+                Rule(f"[bold]{request.subject or '(no subject)'}[/bold] "
+                     f"[dim]from {request.sender}[/dim]")
+            )
+            artifacts = await runner.run_request(request)
+            _render_result(artifacts)
+            triaged += 1
+
+        if once:
+            console.print(f"\n[bold green]Triaged {triaged} message(s).[/bold green]")
+            return 0
+        if live:
+            console.print(f"[dim]Waiting {interval}s for new mail...[/dim]")
+        await asyncio.sleep(interval)
+
+
+def cmd_watch(args: argparse.Namespace) -> int:
+    runner = TriageRunner(
+        settings, base_dir=REPO_ROOT, on_event=_make_event_hook(args.verbose)
+    )
+    inbox = runner.build_inbox()
+    live = type(inbox).__name__ == "GraphInbox"
+
+    if live:
+        checks = asyncio.run(_verify_inbox(inbox))
+        auth, scope = checks["auth"], checks["scope"]
+
+        if not auth.get("ok"):
+            console.print("[red]Graph authentication failed.[/red] Run `triage-demo preflight`.")
+            return 2
+        if auth.get("has_upn"):
+            console.print(
+                "[red]Refusing to run:[/red] the token carries a 'upn' claim, so this is a "
+                "delegated user token, not the app-only identity this agent is designed for."
+            )
+            return 2
+
+        console.print(
+            f"[green]Graph app-only auth OK[/green] "
+            f"[dim]roles={', '.join(auth.get('roles') or []) or 'none'}[/dim]"
+        )
+
+        # Fail closed. App-only Mail.Read is tenant-wide unless an Exchange
+        # ApplicationAccessPolicy scopes it, and we proved that the hard way:
+        # a demo app read the global administrator's mailbox. If the scope
+        # cannot be demonstrated, do not ingest.
+        if scope.get("checked") and scope.get("scoped"):
+            console.print(
+                f"[green]Mailbox scope enforced[/green] "
+                f"[dim]control read of {scope['canary']} denied (403)[/dim]"
+            )
+        elif scope.get("checked") and not scope.get("scoped"):
+            console.print(
+                Panel(
+                    str(scope.get("reason", "")),
+                    title="[red]Refusing to run: app is not scoped[/red]",
+                    border_style="red",
+                )
+            )
+            return 2
+        elif args.require_scope_check:
+            console.print(
+                f"[red]Refusing to run:[/red] mailbox scope could not be proven "
+                f"({scope.get('reason', 'no canary mailbox configured')}). "
+                "Set GRAPH_CANARY_MAILBOX, or pass --no-require-scope-check to override."
+            )
+            return 2
+        else:
+            console.print(
+                f"[yellow]Mailbox scope unverified[/yellow] "
+                f"[dim]({scope.get('reason', 'no canary mailbox configured')})[/dim]"
+            )
+
+        console.print(f"[dim]Watching {settings.graph_mailbox}[/dim]\n")
+    else:
+        console.print("[yellow]Mock inbox[/yellow] [dim](set TRIAGE_TOOL_MODE=live for Graph)[/dim]\n")
+
+    return asyncio.run(
+        _watch_loop(
+            runner,
+            inbox,
+            once=args.once,
+            limit=args.limit,
+            interval=args.interval,
+            live=live,
+        )
+    )
+
+
+async def _verify_inbox(inbox) -> dict[str, Any]:
+    auth = await inbox.verify()
+    scope: dict[str, Any] = {"checked": False, "reason": "no canary mailbox configured"}
+    if auth.get("ok") and settings.graph_canary_mailbox:
+        scope = await inbox.verify_scope(settings.graph_canary_mailbox)
+    return {"auth": auth, "scope": scope}
+
+
+def _operator_graph_token() -> str:
+    """Get a directory-read token for the *operator* running the CLI.
+
+    DefaultAzureCredential is the right choice here and the wrong choice for
+    the agent. This command is a human inspecting the directory, so falling
+    back to their `az login` is exactly what should happen. The agent's own
+    Graph access deliberately does not use this chain -- see tools/inbox.py.
+    """
+    from azure.identity import DefaultAzureCredential
+
+    return DefaultAzureCredential().get_token("https://graph.microsoft.com/.default").token
+
+
+def _identity_panel(report) -> Panel:
+    from rich.table import Table as _Table
+
+    t = _Table(show_header=False, box=None, padding=(0, 1))
+    t.add_column(style="dim", no_wrap=True)
+    t.add_column()
+
+    t.add_row("identity", report.display_name)
+    t.add_row("object id", report.object_id)
+
+    # Agent identities are the only service principals where these are equal.
+    # It is a cheap, verifiable tell that this is not an ordinary app.
+    if report.identity_matches_app:
+        t.add_row("app id", f"{report.app_id} [green](same as object id)[/green]")
+    else:
+        t.add_row("app id", report.app_id)
+
+    t.add_row("enabled", "yes" if report.enabled else "[red]no[/red]")
+
+    if report.blueprint_name:
+        t.add_row("blueprint", report.blueprint_name)
+
+    secret_state = (
+        f"[bold green]none[/bold green] "
+        f"[dim](keys={report.key_credentials}, passwords={report.password_credentials})[/dim]"
+        if report.is_secretless
+        else f"[red]keys={report.key_credentials}, passwords={report.password_credentials}[/red]"
+    )
+    t.add_row("stored secrets", secret_state)
+
+    if report.federated_credentials:
+        t.add_row("authenticates via", ", ".join(report.federated_credentials) + " [dim](federated)[/dim]")
+
+    t.add_row(
+        "sponsor",
+        ", ".join(report.sponsors) if report.sponsors else "[yellow]none recorded[/yellow]",
+    )
+    t.add_row(
+        "permissions",
+        "\n".join(report.graph_app_roles) if report.graph_app_roles else "[dim]none[/dim]",
+    )
+
+    proof = report.scope_proof
+    if proof is not None:
+        lines = [f"[green]granted[/green]  {m}" for m in proof.granted]
+        lines += [f"[red]denied[/red]   {m}" for m in proof.denied]
+        t.add_row("mailbox scope", "\n".join(lines) if lines else "[dim]not checked[/dim]")
+
+    border = "green" if report.is_secretless else "yellow"
+    return Panel(t, title=f"Agent identity: [bold]{report.short_name}[/bold]", border_style=border)
+
+
+def cmd_identity(args: argparse.Namespace) -> int:
+    from triage_demo.identity import (
+        HttpGraphReader,
+        MailboxScopeProof,
+        load_agent_identity,
+        project_name_prefix,
+    )
+
+    try:
+        token = _operator_graph_token()
+    except Exception as exc:
+        console.print(
+            f"[red]Could not authenticate to Microsoft Graph[/red] ({type(exc).__name__}). "
+            "Run `az login` first."
+        )
+        return 2
+
+    reader = HttpGraphReader(token)
+    prefix = project_name_prefix(settings.foundry_project_endpoint)
+
+    proof: MailboxScopeProof | None = None
+    if args.check_scope and settings.graph_mailbox and settings.graph_canary_mailbox:
+        proof = MailboxScopeProof(
+            granted=[settings.graph_mailbox],
+            denied=[settings.graph_canary_mailbox],
+        )
+
+    console.print(
+        Rule("[bold]Agent identities[/bold] [dim]-- who these agents are, and who is accountable[/dim]")
+    )
+    if prefix:
+        console.print(f"[dim]project: {prefix}[/dim]\n")
+
+    found = 0
+    for needle in args.agents:
+        try:
+            report = load_agent_identity(
+                reader,
+                display_name_contains=needle,
+                name_prefix=prefix,
+                scope_proof=proof,
+            )
+        except Exception as exc:
+            console.print(f"[red]Lookup failed for '{needle}':[/red] {type(exc).__name__}: {exc}")
+            continue
+        if report is None:
+            console.print(f"[yellow]No agent identity matching '{needle}'.[/yellow]")
+            continue
+        console.print(_identity_panel(report))
+        found += 1
+
+    if not found:
+        console.print(
+            "\n[dim]No agent identities found. Foundry creates one per agent; if this "
+            "tenant has none, the agents may predate the feature.[/dim]"
+        )
+        return 1
+
+    console.print(
+        "\n[dim]Each agent authenticates as itself, with its own permissions and its own "
+        "audit trail. No client secret exists anywhere in this chain.[/dim]"
+    )
+    return 0
+
+
 def cmd_reset(args: argparse.Namespace) -> int:
     runner = TriageRunner(settings, base_dir=REPO_ROOT)
     runner.flag_table.reset()
@@ -466,6 +727,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="Do not clear the incident store first (keeps prior runs' evidence visible)",
     )
     run.set_defaults(func=cmd_run)
+
+    watch = sub.add_parser("watch", help="Poll a mailbox and triage each new message")
+    watch.add_argument("--once", action="store_true", help="Drain once and exit")
+    watch.add_argument("--limit", type=int, default=10, help="Max messages per poll")
+    watch.add_argument("--interval", type=int, default=30, help="Seconds between polls")
+    watch.add_argument("--verbose", "-v", action="store_true", help="Show agent reasoning")
+    watch.add_argument(
+        "--no-require-scope-check",
+        dest="require_scope_check",
+        action="store_false",
+        help="Allow live ingestion without proving the app is mailbox-scoped (not recommended)",
+    )
+    watch.set_defaults(func=cmd_watch, require_scope_check=True)
+
+    identity = sub.add_parser(
+        "identity", help="Show the Entra agent identity behind each agent"
+    )
+    identity.add_argument(
+        "agents",
+        nargs="*",
+        default=["bi-triage", "bi-data-quality"],
+        help="Substrings matching agent identity display names",
+    )
+    identity.add_argument(
+        "--check-scope",
+        action="store_true",
+        help="Include the mailbox scope the agent is confined to",
+    )
+    identity.set_defaults(func=cmd_identity)
 
     sub.add_parser("flags", help="Show the data quality flag table").set_defaults(func=cmd_flags)
     sub.add_parser("incidents", help="Show the incident store").set_defaults(func=cmd_incidents)

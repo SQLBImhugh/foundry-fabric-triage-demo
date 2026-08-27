@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     graph_mailbox: str = "bi-alerts@contoso.com"
     graph_ingestion_mode: Literal["poll", "subscription"] = "poll"
     graph_poll_seconds: int = 30
+    # A mailbox the agent must NOT be able to read. `watch` probes it at startup
+    # and refuses to run if the read succeeds, because that means the app
+    # registration is not scoped and can read the whole tenant.
+    graph_canary_mailbox: str = ""
     # Set once an Exchange ApplicationAccessPolicy scopes the app registration
     # to `graph_mailbox`. Preflight warns loudly while this is False, because an
     # unscoped app-only Mail.Read grant can read EVERY mailbox in the tenant.
