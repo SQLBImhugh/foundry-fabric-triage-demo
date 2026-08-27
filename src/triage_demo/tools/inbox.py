@@ -47,7 +47,19 @@ logger = logging.getLogger("triage.inbox")
 
 # Deterministic extraction. Anything the regexes miss stays None and the agent
 # has to cope — which is the realistic case and worth showing.
-_REPORT = re.compile(r"(?:report|dataset|semantic model)[:\s\"']+([A-Za-z0-9 _\-]{3,60})", re.I)
+# A quoted name is the strongest signal, and it is the shape Power BI's own
+# alert mail uses: "Refresh failed for 'Production Daily Summary'". The earlier
+# pattern required the literal word report/dataset/semantic model, so it never
+# matched a real alert -- the report name came back None and the model was left
+# to infer one, which it duly invented.
+_REPORT_QUOTED = re.compile(
+    r"(?:for|report|dataset|semantic model)\s*[:\-]?\s*['\"\u2018\u201c]"
+    r"([^'\"\u2019\u201d]{3,60})['\"\u2019\u201d]",
+    re.I,
+)
+_REPORT_BARE = re.compile(
+    r"(?:report|dataset|semantic model)[:\s\"']+([A-Za-z0-9 _\-]{3,60})", re.I
+)
 _DATASET_ID = re.compile(
     r"\b(?:dataset[_ ]?id|datasetId)\W{0,3}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
     re.I,
@@ -56,12 +68,15 @@ _WORKSPACE_ID = re.compile(
     r"\b(?:workspace[_ ]?id|groupId)\W{0,3}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
     re.I,
 )
-_ERROR_CODE = re.compile(r"\b(?:error[_ ]?code|code)\W{0,3}([A-Za-z][A-Za-z0-9_]{3,40})", re.I)
+# Upper bound raised from 40: real codes exceed it, and a code truncated
+# mid-word silently changes the incident signature and stops matching
+# playbooks, which is worse than not extracting one at all.
+_ERROR_CODE = re.compile(r"\b(?:error[_ ]?code|code)\W{0,3}([A-Za-z][A-Za-z0-9_]{3,79})\b", re.I)
 
 
 def parse_hints(subject: str, body: str) -> dict[str, str | None]:
     blob = f"{subject}\n{body}"
-    report = _REPORT.search(blob)
+    report = _REPORT_QUOTED.search(blob) or _REPORT_BARE.search(blob)
     dataset = _DATASET_ID.search(blob)
     workspace = _WORKSPACE_ID.search(blob)
     code = _ERROR_CODE.search(blob)

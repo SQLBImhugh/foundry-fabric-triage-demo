@@ -33,3 +33,4 @@ Thumbs.db
 # Local agent/CLI tooling config — machine-specific, not part of the demo
 .github/copilot/settings.json
 .foundry/
+.azure

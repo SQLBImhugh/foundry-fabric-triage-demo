@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+name: foundry-fabric-triage-demo
+services:
+    bi-request-triage:
+        host: azure.ai.project
+        endpoint: https://bitriage-foundry-eus.services.ai.azure.com/api/projects/bi-request-triage
+    bi-triage-controller:
+        project: ./src
+        host: azure.ai.agent
+        language: python
+        uses:
+            - bi-request-triage
+        codeConfiguration:
+            dependencyResolution: remote_build
+            entryPoint: app.py
+            runtime: python_3_13
+        container:
+            resources:
+                cpu: "1"
+                memory: 2Gi
+        kind: hosted
+        name: bi-triage-controller
+        environmentVariables:
+            # The controller reasons through the Foundry prompt agents and acts
+            # through real tools. Mock stays available for offline rehearsal by
+            # overriding these, but the deployed default is the real thing.
+            - name: TRIAGE_PROVIDER_MODE
+              value: foundry
+            - name: TRIAGE_TOOL_MODE
+              value: live
+            - name: FOUNDRY_PROJECT_ENDPOINT
+              value: https://bitriage-foundry-eus.services.ai.azure.com/api/projects/bi-request-triage
+            - name: FOUNDRY_TRIAGE_AGENT_NAME
+              value: bi-triage
+            - name: FOUNDRY_DQ_AGENT_NAME
+              value: bi-data-quality
+            - name: FOUNDRY_AGENT_MODEL
+              value: gpt-5.6-luna
+            - name: FOUNDRY_HANDOFF_MODE
+              value: responses
+            # No GRAPH_CLIENT_SECRET. The container authenticates as its own
+            # Entra agent identity, which has no stored credential to leak.
+            - name: GRAPH_TENANT_ID
+              value: edf144d9-f468-4b8e-8443-f51dadfbc4f9
+            - name: GRAPH_MAILBOX
+              value: Mork@mngenvmcap777813.onmicrosoft.com
+            # A mailbox the agent must NOT be able to read. Startup refuses to
+            # ingest if this read succeeds, because app-only Mail.Read is
+            # tenant-wide until Exchange scopes it.
+            - name: GRAPH_CANARY_MAILBOX
+              value: mhugh@MngEnvMCAP777813.onmicrosoft.com
+            - name: INCIDENT_TABLE_ENDPOINT
+              value: https://bitriagestore6343.table.core.windows.net/
+            - name: INCIDENT_TABLE_NAME
+              value: incidents
+        protocols:
+            - protocol: responses
+              version: 2.0.0
+infra:
+    provider: microsoft.foundry

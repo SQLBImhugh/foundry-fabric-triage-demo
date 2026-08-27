@@ -32,10 +32,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 from typing import Any
 
-from agent_framework import AgentResponse, BaseAgent, Message
+from agent_framework import (
+    AgentResponse,
+    AgentResponseUpdate,
+    BaseAgent,
+    Message,
+)
+from agent_framework._agents import ResponseStream
 from agent_framework_foundry_hosting import ResponsesHostServer
 
 from triage_demo.runner import TriageRunner
@@ -95,14 +102,48 @@ class TriageControllerAgent(BaseAgent):
         self._runner = TriageRunner(settings, base_dir=REPO_ROOT)
         self._lock = asyncio.Lock()
 
-    async def run(  # type: ignore[override]
+    def run(  # type: ignore[override]
         self,
         messages: Any = None,
         *,
         stream: bool = False,
         session: Any = None,
         **kwargs: Any,
-    ) -> AgentResponse[Any]:
+    ) -> Any:
+        """Entry point for both streaming and non-streaming callers.
+
+        Deliberately *not* an ``async def``. The host calls this with
+        ``stream=True`` and immediately iterates the result, so an async
+        function -- which returns a coroutine -- fails with
+        "'coroutine' object has no attribute '__anext__'". The contract is a
+        sync method returning either an awaitable or an async iterable.
+
+        Triage is not meaningfully incremental: it runs tools and returns a
+        verdict. So the streaming path emits the finished summary as a single
+        update rather than pretending to produce tokens.
+        """
+        if stream:
+            return ResponseStream(self._stream(messages), finalizer=self._finalize)
+        return self._run_once(messages)
+
+    async def _stream(self, messages: Any) -> AsyncIterator[AgentResponseUpdate]:
+        response = await self._run_once(messages)
+        text = response.messages[0].text if response.messages else ""
+        yield AgentResponseUpdate(
+            role="assistant", contents=[{"type": "text", "text": text}]
+        )
+
+    @staticmethod
+    def _finalize(updates: Sequence[AgentResponseUpdate]) -> AgentResponse[Any]:
+        text = "".join(
+            content.text
+            for update in updates
+            for content in (update.contents or [])
+            if getattr(content, "text", None)
+        )
+        return AgentResponse(messages=[Message("assistant", [text])])
+
+    async def _run_once(self, messages: Any) -> AgentResponse[Any]:
         text = _text_of(messages)
 
         # One triage at a time. Two concurrent runs would race on the incident
