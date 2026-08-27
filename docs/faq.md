@@ -80,6 +80,15 @@ The demo polls. Production is event-driven, and the renewal has to be monitored,
 because the failure mode is silence rather than an error. Most teams renew at
 least daily rather than waiting for the ~3-day ceiling.
 
+Either way, the token is **app-only** (`Mail.Read` as an application permission,
+admin-consented) — no signed-in user, no stored refresh token. Verified working
+on a work tenant.
+
+One thing to raise before they ask it in a security review: that permission is
+**tenant-wide** unless you add an Exchange `ApplicationAccessPolicy` scoping the
+app to the single alerts mailbox. We verified the unscoped case really does read
+other mailboxes, so it is worth scoping on day one rather than day ninety.
+
 Measure the real number during rehearsal and quote it rather than estimating.
 
 ---
@@ -101,9 +110,21 @@ is why the demo uses one.
 
 **Teams.** The old Office 365 connector "Incoming Webhook" was **retired on
 22 May 2026**; the demo uses a **Power Automate Workflows webhook**, which takes
-the same Adaptive Card payload. Posts appear as the Workflows bot rather than a
-custom identity. Production designs generally use a bot or delegated Graph flow,
-because app-only posting to channel messages is restricted.
+the same Adaptive Card payload.
+
+There is deliberately **no app-only path** for normal channel posting — Graph
+restricts the Application permission to `Teamwork.Migrate.All` (migration and
+import only). Sending a normal channel message needs delegated
+`ChannelMessage.Send`, a bot, or a Workflows webhook. So the asymmetry is:
+
+| | Unattended? |
+|---|---|
+| Read a mailbox (`Mail.Read`, application) | Yes — verified |
+| Post to a Teams channel as an app | No — migration scenarios only |
+
+Microsoft makes it harder for an application to speak into a human conversation
+than to read a mailbox. That is a defensible position, and it shapes the design:
+webhook for the demo, a bot for production.
 
 **Azure control plane.** `DefaultAzureCredential` throughout — managed identity in
 Azure, developer credentials locally. No API keys anywhere.

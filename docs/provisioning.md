@@ -68,20 +68,39 @@ membership.
 
 ---
 
-## 2. App registration for Microsoft Graph
+## 2. App registration for Microsoft Graph (inbox trigger)
 
-For inbox polling.
+**Verified working on a work tenant, 2026-08-27** — see
+[`foundry-native-architecture.md`](foundry-native-architecture.md#trigger--notification--work-tenant-spike-2026-08-27).
 
 - Permission: **`Mail.Read`** — *Application*, not Delegated
-- **Admin consent granted** (the demo runs with no signed-in user)
-- Client secret recorded, with its expiry noted
+- **Admin consent granted** (the agent runs with no signed-in user)
+- Identity: prefer a **managed identity or federated credential**. A client
+  secret works for a demo, but it expires and then the trigger silently stops
 
-> Note the expiry. Entra app secrets expire, and a demo environment rebuilt in
-> three months fails at exactly that point. For anything long-lived, use
-> federated credentials instead.
+Application permission is the right choice specifically *because* the agent is
+unattended. Delegated permission needs a signed-in user; there isn't one when a
+routine fires at 05:00.
 
-Optional narrowing: `ApplicationAccessPolicy` restricts the app to a single
-mailbox, which is worth doing if anyone asks about scope.
+### Scope it to one mailbox — do this at the same time
+
+> **`Mail.Read` as an application permission is tenant-wide.** Verified: a spike
+> app created to read one demo mailbox successfully read the global
+> administrator's inbox. Unscoped, "an agent that reads the BI alerts inbox" is
+> an agent that can read every mailbox in the organisation.
+
+```powershell
+# Exchange Online PowerShell
+New-ApplicationAccessPolicy -AppId <app-id> `
+  -PolicyScopeGroupId bi-alerts@contoso.com `
+  -AccessRight RestrictAccess `
+  -Description "Triage demo: BI alerts mailbox only"
+
+Test-ApplicationAccessPolicy -Identity bi-alerts@contoso.com -AppId <app-id>
+```
+
+Treat this as part of the app registration, not a follow-up task. It is the
+difference between a scoped integration and a tenant-wide mailbox read.
 
 ### Verify
 
@@ -96,6 +115,18 @@ $tok = (Invoke-RestMethod -Method Post -Body $body `
 Invoke-RestMethod -Headers @{Authorization="Bearer $tok"} `
   "https://graph.microsoft.com/v1.0/users/$env:GRAPH_MAILBOX/mailFolders/inbox/messages?`$top=1"
 ```
+
+A successful read with a token carrying `roles: Mail.Read` and **no** `upn`
+claim confirms the unattended path.
+
+### Not the Outlook connector
+
+The Foundry catalog exposes `outlook` (consumer/MSA, `oauth2generic`) and
+`office365` (work/school, `aadcertificate`). Neither is used here:
+
+- the connector catalog returned no entries in the tenant tested, and
+- gateway connectors authenticate by **per-user OAuth consent**, which has no
+  meaning for an unattended agent.
 
 ---
 
