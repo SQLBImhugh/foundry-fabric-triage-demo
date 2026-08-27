@@ -223,8 +223,10 @@ async def test_data_quality_turns_are_charged_to_the_shared_ledger(
     )
     result = await triage_with_dq(provider).run(sample_request, dupe_deps)
 
-    # 2 orchestrator turns + 2 data-quality turns.
-    assert result.llm_turns == 4, "DQ agent turns are not reaching the ledger"
+    # 2 orchestrator turns + 1 data-quality turn. The DQ agent no longer runs a
+    # tool loop: the orchestrator scans deterministically and passes the
+    # evidence in, so interpreting it costs exactly one turn.
+    assert result.llm_turns == 3, "DQ agent turns are not reaching the ledger"
     assert result.tool_calls >= 3, "DQ agent tool calls are not reaching the ledger"
 
 

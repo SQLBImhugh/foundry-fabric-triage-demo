@@ -141,9 +141,9 @@ async def test_unparseable_model_output_still_yields_a_usable_finding(
 
 
 async def test_fenced_json_is_parsed(sample_request, dupe_dataset) -> None:
+    """Models routinely wrap JSON in a code fence; that must not lose the finding."""
     provider = CannedProvider(
         responses=[
-            _tool_response("check_duplicates", {"table": "well_production"}),
             LLMResponse(
                 content='```json\n{"has_issue": true, "detail": "Four duplicates."}\n```',
                 finish_reason="stop",

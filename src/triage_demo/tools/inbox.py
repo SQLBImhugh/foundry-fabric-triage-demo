@@ -14,13 +14,28 @@ Two mechanisms, because the customer explicitly asked to see the difference:
 
 Both produce the same :class:`BIRequest`, so the agent code never knows which
 one is wired up.
+
+Authentication choice
+---------------------
+The Graph path uses app-only authentication rather than delegated
+authentication because the agent is unattended: a scheduled routine fires when
+mail arrives, so there is no signed-in user to consent. In production, prefer a
+managed identity or federated credential over a client secret.
+
+The security caveat is important: app-only ``Mail.Read`` is **TENANT-WIDE**
+unless an Exchange ``ApplicationAccessPolicy`` scopes the app. An unscoped app
+that is intended to read one alerts mailbox can read every mailbox in the
+tenant — including, as verified during the work-tenant spike, the global
+administrator's mailbox.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -110,7 +125,7 @@ class MockInbox:
 class GraphInbox:
     """Polls a monitored mailbox via Microsoft Graph.
 
-    Requires application permission ``Mail.Read`` (admin consented). Marks
+    Uses an admin-consented application permission (``Mail.Read``). Marks
     nothing as read — the demo re-runs must be repeatable — so dedup is by
     message id held in memory.
     """
@@ -118,19 +133,45 @@ class GraphInbox:
     _BASE = "https://graph.microsoft.com/v1.0"
     _SCOPE = "https://graph.microsoft.com/.default"
 
-    def __init__(self, *, tenant_id: str, client_id: str, client_secret: str, mailbox: str):
+    def __init__(
+        self,
+        *,
+        tenant_id: str,
+        client_id: str,
+        client_secret: str | None = None,
+        mailbox: str,
+    ):
         self._tenant_id = tenant_id
         self._client_id = client_id
-        self._client_secret = client_secret
+        self._client_secret = client_secret or ""
         self._mailbox = mailbox
         self._seen: set[str] = set()
         self._token: str = ""
+        self._token_expires_at: float = 0.0
 
     async def _get_token(self) -> str:
+        if self._token and time.time() < self._token_expires_at - 60:
+            return self._token
+
+        if not self._client_id:
+            raise ValueError("graph_client_id is required for Graph authentication")
+
+        if not self._client_secret:
+            # The credential chain supports managed identity and workload
+            # identity federation without putting a rotating secret in the
+            # demo's environment.
+            from azure.identity import DefaultAzureCredential
+
+            token = DefaultAzureCredential().get_token(self._SCOPE)
+            self._token = token.token
+            try:
+                self._token_expires_at = float(token.expires_on)
+            except (AttributeError, TypeError, ValueError):
+                self._token_expires_at = 0.0
+            return self._token
+
         import httpx
 
-        if self._token:
-            return self._token
         url = f"https://login.microsoftonline.com/{self._tenant_id}/oauth2/v2.0/token"
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
@@ -143,7 +184,16 @@ class GraphInbox:
                 },
             )
             resp.raise_for_status()
-            self._token = resp.json()["access_token"]
+            payload = resp.json()
+
+        self._token = payload["access_token"]
+        try:
+            self._token_expires_at = time.time() + float(payload.get("expires_in", 0))
+        except (TypeError, ValueError):
+            # A token without a usable lifetime is never reused. Caching it
+            # forever would turn a transient configuration mistake into a
+            # persistent authentication failure.
+            self._token_expires_at = 0.0
         return self._token
 
     async def fetch(self, limit: int = 10) -> list[BIRequest]:
@@ -185,3 +235,42 @@ class GraphInbox:
                 )
             )
         return out
+
+    @staticmethod
+    def _decode_jwt_payload(token: str) -> dict[str, Any]:
+        """Decode the JWT payload without validating or exposing the token."""
+        parts = token.split(".")
+        if len(parts) < 2:
+            raise ValueError("Graph access token is not a JWT")
+
+        encoded = parts[1] + "=" * (-len(parts[1]) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(encoded).decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("Graph access token payload is not a JSON object")
+        return payload
+
+    async def verify(self) -> dict[str, Any]:
+        """Return safe metadata about Graph authentication for preflight."""
+        try:
+            token = await self._get_token()
+            payload = self._decode_jwt_payload(token)
+        except Exception as exc:
+            # Do not include exception details: an auth library can echo
+            # request data, and the access token must never reach logs.
+            logger.warning(
+                "Graph inbox authentication verification failed (%s)",
+                type(exc).__name__,
+            )
+            return {"ok": False, "roles": [], "has_upn": False}
+
+        roles = payload.get("roles", [])
+        if isinstance(roles, str):
+            roles = [roles]
+        elif not isinstance(roles, list):
+            roles = []
+
+        return {
+            "ok": True,
+            "roles": [str(role) for role in roles],
+            "has_upn": "upn" in payload,
+        }

@@ -1,29 +1,28 @@
-"""Azure AI Foundry provider — `foundry` mode.
+"""Foundry provider — invokes a registered Foundry agent.
 
-Talks to the Foundry agents REST surface with ``httpx`` +
-``DefaultAzureCredential`` rather than through a client SDK. That is a
-deliberate choice: the Foundry Python SDKs have churned repeatedly across
-preview versions, and a demo that breaks because a package minor-bumped the
-week before is a bad demo. The REST contract has been comparatively stable,
-and it makes the wire format visible on screen — which is exactly what the
-customer asked to see.
+Talks to the Foundry data plane with ``httpx`` + ``DefaultAzureCredential``
+rather than a client SDK. That is deliberate: two breaking details surfaced in a
+single afternoon of testing (``?api-version=v1`` is rejected on the responses
+route, and the ``agent`` property was replaced by ``agent_reference``). A demo
+that breaks because a preview SDK minor-bumped is a bad demo, and REST puts the
+wire format on screen — which is what the customer asked to see.
 
-Two handoff shapes are supported, and the difference matters:
+Handoff shapes
+--------------
+``responses`` (default, and what the demo runs)
+    The orchestrator invokes the Data Quality agent over
+    ``POST {project}/openai/v1/responses`` with an ``agent_reference``. It is a
+    real call to a separate, independently versioned Foundry agent with its own
+    managed identity — and because *our* code makes the call, the
+    :class:`~triage_demo.policy.PolicyLedger` charges it.
 
-**Client-orchestrated** (``handoff_mode="client"``, the default here)
-    The Triage agent declares ``consult_data_quality_agent`` as an ordinary
-    tool. When the model calls it, *this process* invokes the Data Quality
-    agent and feeds the structured result back. The controller sees the
-    handoff, can charge it against the ledger, and can refuse it.
+``a2a``
+    Foundry's ``a2a_preview`` tool. **Requires the callee to be a hosted agent
+    declaring ``container_protocol_versions: [{"protocol": "a2a"}]``.** Pointing
+    it at a prompt agent fails at agent-card fetch with a 401 that reads like an
+    auth problem and is not. Documented, not defaulted.
 
-**Connected agent** (``handoff_mode="connected"``)
-    The Data Quality agent is registered as a tool *of the Triage agent* in
-    the Foundry control plane. Foundry performs the handoff server-side. It
-    demos beautifully and the trace is legible — but the calling process no
-    longer sits between the two agents, so any budget or allowlist you rely
-    on has to be expressed as agent instructions rather than code.
-
-Show both. Ship the first.
+Verified 2026-08-27 against a live project.
 """
 
 from __future__ import annotations
@@ -39,11 +38,10 @@ from triage_demo.providers.base import LLMResponse, ToolCall
 logger = logging.getLogger("triage.provider.foundry")
 
 FOUNDRY_SCOPE = "https://ai.azure.com/.default"
-API_VERSION = "2025-05-15-preview"
 
 
 class FoundryAgentProvider:
-    """Invokes a named Foundry agent, returning tool calls for local execution."""
+    """Invokes a named Foundry agent over the responses API."""
 
     provider_name = "foundry"
 
@@ -52,18 +50,19 @@ class FoundryAgentProvider:
         *,
         project_endpoint: str,
         agent_name: str,
-        api_version: str = API_VERSION,
-        handoff_mode: str = "client",
+        agent_version: str | None = None,
+        handoff_mode: str = "responses",
     ):
         if not project_endpoint:
             raise ValueError("FOUNDRY_PROJECT_ENDPOINT is required for foundry mode")
         self._endpoint = project_endpoint.rstrip("/")
         self.model_name = agent_name
         self._agent_name = agent_name
-        self._api_version = api_version
+        self._agent_version = agent_version
         self.handoff_mode = handoff_mode
         self._token: str = ""
         self._token_expires_at: float = 0.0
+        self.last_content_filters: list[dict[str, Any]] = []
 
     # --- auth --------------------------------------------------------------
 
@@ -73,8 +72,7 @@ class FoundryAgentProvider:
 
         from azure.identity import DefaultAzureCredential
 
-        cred = DefaultAzureCredential()
-        token = cred.get_token(FOUNDRY_SCOPE)
+        token = DefaultAzureCredential().get_token(FOUNDRY_SCOPE)
         self._token = token.token
         self._token_expires_at = float(token.expires_on)
         return self._token
@@ -96,51 +94,80 @@ class FoundryAgentProvider:
     ) -> LLMResponse:
         import httpx
 
-        url = f"{self._endpoint}/agents/{self._agent_name}/responses"
+        agent_ref: dict[str, Any] = {"type": "agent_reference", "name": self._agent_name}
+        if self._agent_version:
+            agent_ref["version"] = str(self._agent_version)
+
+        # Tools live on the registered agent definition. Sending them per
+        # request would shadow the registration and make the portal view a lie.
         payload: dict[str, Any] = {
-            "input": _to_foundry_input(messages),
-            "temperature": temperature,
+            "agent_reference": agent_ref,
+            "input": _to_input_items(messages),
         }
-        # In connected-agent mode the tool list lives on the registered agent
-        # definition; sending it per-request would shadow it.
-        if tools and self.handoff_mode == "client":
-            payload["tools"] = tools
 
         with gen_ai_span(
             provider=self.provider_name,
             model=self.model_name,
             **{"gen_ai.agent.name": self._agent_name, "handoff.mode": self.handoff_mode},
         ) as span:
-            async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(
-                    url,
-                    params={"api-version": self._api_version},
-                    headers=self._headers(),
-                    json=payload,
-                )
+            # NOTE: this route rejects `?api-version=v1` — it requires the /v1
+            # path form. Discovered by probing; the error message is explicit.
+            url = f"{self._endpoint}/openai/v1/responses"
+            async with httpx.AsyncClient(timeout=180) as client:
+                resp = await client.post(url, headers=self._headers(), json=payload)
+                if resp.status_code != 200:
+                    logger.error(
+                        "Foundry responses call failed %s: %s",
+                        resp.status_code,
+                        resp.text[:500],
+                    )
                 resp.raise_for_status()
                 body = resp.json()
 
             parsed = _parse_response(body)
+            self.last_content_filters = body.get("content_filters", []) or []
             span.record_usage(parsed.prompt_tokens, parsed.completion_tokens)
             span.record_finish(parsed.finish_reason)
             return parsed
+
+    def guardrail_summary(self) -> dict[str, bool]:
+        """Flatten the last call's prompt-side filter results.
+
+        Surfaced so the orchestrator can show that XPIA screening actually ran
+        on untrusted email content, rather than asserting that it did.
+        """
+        out: dict[str, bool] = {}
+        for cf in self.last_content_filters:
+            if cf.get("source_type") != "prompt":
+                continue
+            for name, result in (cf.get("content_filter_results") or {}).items():
+                if isinstance(result, dict) and "detected" in result:
+                    out[name] = bool(result["detected"])
+        return out
 
     async def close(self) -> None:
         return None
 
 
-def _to_foundry_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Translate chat-style messages into Foundry response input items."""
+def _to_input_items(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Translate chat-style messages into responses input items.
+
+    ``system`` turns are dropped: the registered agent already carries its
+    instructions, so re-sending them would duplicate the prompt and silently
+    diverge from what the portal shows.
+    """
     out: list[dict[str, Any]] = []
     for msg in messages:
         role = msg.get("role")
+        if role == "system":
+            continue
+
         if role == "tool":
             out.append(
                 {
                     "type": "function_call_output",
                     "call_id": msg.get("tool_call_id", ""),
-                    "output": msg.get("content", ""),
+                    "output": str(msg.get("content", "")),
                 }
             )
             continue
@@ -158,12 +185,12 @@ def _to_foundry_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
         content = msg.get("content")
         if content:
-            out.append({"role": role, "content": content})
+            out.append({"role": role or "user", "content": str(content)})
     return out
 
 
 def _parse_response(body: dict[str, Any]) -> LLMResponse:
-    """Extract text + function calls from a Foundry response payload."""
+    """Extract text + function calls from a responses payload."""
     text_parts: list[str] = []
     tool_calls: list[ToolCall] = []
 
@@ -192,7 +219,7 @@ def _parse_response(body: dict[str, Any]) -> LLMResponse:
     return LLMResponse(
         content="\n".join(p for p in text_parts if p),
         tool_calls=tool_calls,
-        finish_reason="tool_calls" if tool_calls else (body.get("status") or "stop"),
+        finish_reason="tool_calls" if tool_calls else str(body.get("status") or "stop"),
         prompt_tokens=int(usage.get("input_tokens", 0) or 0),
         completion_tokens=int(usage.get("output_tokens", 0) or 0),
     )

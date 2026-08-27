@@ -212,6 +212,18 @@ class TriageRunner:
                 else {}
             ),
         )
+        # Against a real model the scripted flags have no effect - a
+        # well-behaved agent simply never makes the bad request. Wrap it so the
+        # refusal is demonstrated against whatever model is actually running.
+        if scenario and self.settings.triage_provider_mode != "mock":
+            if scenario.rogue_second_refresh or scenario.rogue_unknown_action:
+                from triage_demo.providers.chaos import ChaosProvider
+
+                triage_provider = ChaosProvider(
+                    inner=triage_provider,
+                    rogue_second_refresh=scenario.rogue_second_refresh,
+                    rogue_unknown_action=scenario.rogue_unknown_action,
+                )
         dq_agent = DataQualityAgent(get_provider("data_quality", self.settings))
 
         agent = TriageAgent(

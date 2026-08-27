@@ -272,7 +272,12 @@ class ScriptedProvider:
 
 @dataclass
 class ScriptedDataQualityProvider:
-    """Scripted reasoning for the Data Quality agent."""
+    """Scripted reasoning for the Data Quality agent.
+
+    The agent no longer calls a tool: the orchestrator runs the deterministic
+    scan and passes the evidence in, so this provider just interprets whatever
+    evidence appears in the user message.
+    """
 
     provider_name: str = "mock"
     model_name: str = "scripted-dq-v1"
@@ -284,37 +289,31 @@ class ScriptedDataQualityProvider:
         tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.1,
     ) -> LLMResponse:
-        results = _tool_results(messages)
-        counts = _call_counts(messages)
+        evidence: dict[str, Any] = {}
+        for msg in messages:
+            if msg.get("role") != "user":
+                continue
+            text = str(msg.get("content", ""))
+            start, end = text.find("{"), text.rfind("}")
+            if 0 <= start < end:
+                try:
+                    evidence = json.loads(text[start : end + 1])
+                except json.JSONDecodeError:
+                    evidence = {}
 
-        if "check_duplicates" not in counts:
-            table = ""
-            for msg in messages:
-                if msg.get("role") == "user" and "tables:" in str(msg.get("content", "")):
-                    table = str(msg["content"]).split("tables:", 1)[1].split("\n", 1)[0].strip()
-                    break
-            return LLMResponse(
-                content="Scanning the registered table for duplicate keys.",
-                tool_calls=[
-                    ToolCall(
-                        id=f"call_{uuid.uuid4().hex[:8]}",
-                        name="check_duplicates",
-                        arguments={"table": table.split(",")[0].strip()},
-                    )
-                ],
-                finish_reason="tool_calls",
-                prompt_tokens=280,
-                completion_tokens=40,
-            )
-
-        evidence = results.get("check_duplicates", {})
         dupes = int(evidence.get("duplicate_row_count", 0) or 0)
+        table = evidence.get("table", "the source table")
+        keys = ", ".join(evidence.get("key_columns") or [])
+
         if dupes > 0:
             payload = {
                 "has_issue": True,
                 "issue_type": "duplicates",
                 "confidence": 1.0,
-                "detail": evidence.get("headline", "Duplicate records detected."),
+                "detail": (
+                    f"Table {table} contains {dupes} duplicate rows across "
+                    f"{evidence.get('duplicate_group_count', 0)} key groups on ({keys})"
+                ),
                 "recommended_action": "flag_and_notify",
             }
         else:
@@ -322,7 +321,7 @@ class ScriptedDataQualityProvider:
                 "has_issue": False,
                 "issue_type": "none",
                 "confidence": 1.0,
-                "detail": "No duplicate keys found in the registered tables.",
+                "detail": f"No duplicate keys found in {table}.",
                 "recommended_action": "no_action",
             }
 

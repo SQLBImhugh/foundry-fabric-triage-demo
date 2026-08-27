@@ -23,7 +23,6 @@ from triage_demo.observability import tool_span, with_agent_context
 from triage_demo.prompts import load_prompt, prompt_version_hash
 from triage_demo.providers.base import BaseProvider
 from triage_demo.tools.dataset import DatasetSource, detect_duplicates
-from triage_demo.tools.registry import DQ_TOOLS
 
 logger = logging.getLogger("triage.agent.dq")
 
@@ -54,13 +53,24 @@ class DataQualityAgent:
         reason: str = "",
         ledger: Any = None,
     ) -> DataQualityFinding:
-        """Inspect the registered tables and return a structured finding.
+        """Scan deterministically, then let the agent interpret the evidence.
+
+        The scan runs **here, in the orchestrator, with no model involved**, and
+        the resulting counts are passed to the agent as ground truth. The agent
+        writes the sentence; it does not produce the numbers.
+
+        That split is deliberate and load-bearing:
+
+        * the numbers are identical on every rehearsal, so the demo is
+          reproducible and the flag table is trustworthy;
+        * the Data Quality agent needs no tools of its own, which means it can
+          be a plain Foundry prompt agent rather than something that has to be
+          hosted and made server-callable;
+        * a model that contradicts the scan loses (see :meth:`_reconcile`).
 
         ``ledger`` is the orchestrator's :class:`PolicyLedger`. It is shared
         rather than per-agent on purpose: a budget that only covers the
-        orchestrator is not a budget for the run. Without this, a second agent
-        could burn an unbounded number of turns and tokens while the reported
-        totals stayed small.
+        orchestrator is not a budget for the run.
         """
         if not datasets:
             return DataQualityFinding(
@@ -71,6 +81,34 @@ class DataQualityAgent:
                 agent_name=self.AGENT_NAME,
             )
 
+        # --- deterministic evidence, before any model call ------------------
+        evidence: DuplicateEvidence | None = None
+        scan_error: str = ""
+        source = next(iter(datasets.values()))
+        with tool_span("check_duplicates", table=source.name):
+            if not source.exists():
+                scan_error = f"No file at {source.path}"
+            else:
+                evidence = detect_duplicates(
+                    path=source.path,
+                    key_columns=source.key_columns,
+                    table_name=source.name,
+                )
+        if ledger is not None:
+            ledger.charge_tool_call("check_duplicates")
+
+        if evidence is None:
+            return DataQualityFinding(
+                has_issue=False,
+                issue_type="unknown",
+                confidence=0.0,
+                detail=f"Deterministic scan could not run: {scan_error}",
+                checked_tables=list(datasets),
+                recommended_action="escalate",
+                agent_name=self.AGENT_NAME,
+            )
+
+        # --- the agent interprets it ----------------------------------------
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": load_prompt(PROMPT_FILE)},
             {
@@ -79,103 +117,22 @@ class DataQualityAgent:
                     f"A BI failure was reported.\n"
                     f"subject: {request.subject}\n"
                     f"report: {request.report_name or 'unknown'}\n"
-                    f"consultation reason: {reason or 'routine data quality gate'}\n"
-                    f"tables: {', '.join(datasets)}\n\n"
-                    "Inspect the table(s) and return your finding as JSON."
+                    f"consultation reason: {reason or 'routine data quality gate'}\n\n"
+                    f"Deterministic scan evidence (ground truth):\n"
+                    f"{evidence.model_dump_json()}\n\n"
+                    "Return your finding as a single JSON object."
                 ),
             },
         ]
 
-        evidence: DuplicateEvidence | None = None
-        model_payload: dict[str, Any] = {}
+        if ledger is not None:
+            ledger.charge_llm_turn()
+        resp = await self._provider.complete(messages=messages)
+        if ledger is not None:
+            ledger.charge_tokens(resp.total_tokens)
 
-        for _ in range(self._max_turns):
-            if ledger is not None:
-                ledger.charge_llm_turn()
-
-            resp = await self._provider.complete(messages=messages, tools=DQ_TOOLS)
-
-            if ledger is not None:
-                ledger.charge_tokens(resp.total_tokens)
-
-            if not resp.tool_calls:
-                model_payload = _parse_json_object(resp.content)
-                break
-
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": resp.content or None,
-                    "tool_calls": [
-                        {
-                            "id": call.id,
-                            "type": "function",
-                            "function": {
-                                "name": call.name,
-                                "arguments": json.dumps(call.arguments),
-                            },
-                        }
-                        for call in resp.tool_calls
-                    ],
-                }
-            )
-
-            for call in resp.tool_calls:
-                if ledger is not None:
-                    ledger.charge_tool_call(call.name)
-                result = self._execute(call.name, call.arguments, datasets)
-                if call.name == "check_duplicates" and isinstance(result, dict):
-                    ev = result.get("_evidence")
-                    if isinstance(ev, DuplicateEvidence):
-                        evidence = ev
-                        result = {k: v for k, v in result.items() if k != "_evidence"}
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call.id,
-                        "name": call.name,
-                        "content": json.dumps(result, default=str),
-                    }
-                )
-
+        model_payload = _parse_json_object(resp.content)
         return self._reconcile(model_payload, evidence, list(datasets))
-
-    # --- tools -------------------------------------------------------------
-
-    def _execute(
-        self, name: str, args: dict[str, Any], datasets: dict[str, DatasetSource]
-    ) -> Any:
-        if name != "check_duplicates":
-            return {"status": "unknown_tool", "tool": name}
-
-        requested = str(args.get("table") or "").strip()
-        source = datasets.get(requested) or next(iter(datasets.values()))
-
-        with tool_span("check_duplicates", table=source.name):
-            if not source.exists():
-                return {
-                    "status": "missing",
-                    "table": source.name,
-                    "reason": f"No file at {source.path}",
-                }
-
-            evidence = detect_duplicates(
-                path=source.path,
-                key_columns=source.key_columns,
-                table_name=source.name,
-            )
-
-        return {
-            "status": "ok",
-            "table": evidence.table,
-            "key_columns": evidence.key_columns,
-            "duplicate_group_count": evidence.duplicate_group_count,
-            "duplicate_row_count": evidence.duplicate_row_count,
-            "total_row_count": evidence.total_row_count,
-            "sample_keys": evidence.sample_keys,
-            "headline": evidence.headline(),
-            "_evidence": evidence,
-        }
 
     # --- reconciliation ----------------------------------------------------
 

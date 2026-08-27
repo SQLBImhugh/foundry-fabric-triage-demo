@@ -31,10 +31,15 @@ class Settings(BaseSettings):
     foundry_project_endpoint: str = ""
     foundry_triage_agent_name: str = "bi-triage"
     foundry_dq_agent_name: str = "bi-data-quality"
-    # Which agent-to-agent handoff shape the runtime uses. See
-    # docs/architecture.md - `connected` requires the Data Quality agent's tools
-    # to be server-callable, which the demo's local CSV scan is not.
-    foundry_handoff_mode: Literal["client", "connected"] = "client"
+    foundry_agent_model: str = "gpt-5.6-luna"
+    # Which agent-to-agent handoff shape the runtime uses.
+    # 'responses'  = invoke the other agent over /openai/v1/responses. Our code
+    #                makes the call, so the PolicyLedger charges it. Verified.
+    # 'a2a'        = Foundry's a2a_preview tool. Requires the callee to be a
+    #                HOSTED agent speaking the 'a2a' protocol; a prompt agent
+    #                publishes no agent card and the call fails at card fetch.
+    foundry_handoff_mode: Literal["responses", "a2a"] = "responses"
+    foundry_guardrail_name: str = "bi-triage-guardrail"
 
     # --- Azure OpenAI (direct mode) ---------------------------------------
     azure_openai_endpoint: str = ""
@@ -48,6 +53,10 @@ class Settings(BaseSettings):
     graph_mailbox: str = "bi-alerts@contoso.com"
     graph_ingestion_mode: Literal["poll", "subscription"] = "poll"
     graph_poll_seconds: int = 30
+    # Set once an Exchange ApplicationAccessPolicy scopes the app registration
+    # to `graph_mailbox`. Preflight warns loudly while this is False, because an
+    # unscoped app-only Mail.Read grant can read EVERY mailbox in the tenant.
+    graph_mailbox_scoped: bool = False
 
     # --- Power BI ----------------------------------------------------------
     powerbi_tenant_id: str = ""
