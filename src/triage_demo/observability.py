@@ -53,6 +53,24 @@ def configure_telemetry(connection_string: str = "") -> bool:
     """
     if not connection_string:
         return False
+
+    # Telemetry export failures must not appear on screen. The Azure Monitor
+    # exporter logs a full traceback when it cannot reach the service --
+    # including the live-metrics ping, which fires on a timer regardless of
+    # whether anything is being traced. On a laptop with flaky wifi, or a demo
+    # room with a captive portal, that puts a stack trace in the middle of a
+    # scenario run in front of an audience.
+    #
+    # Silenced rather than lowered: there is nothing an operator can do about a
+    # dropped span mid-demo, and the run itself is unaffected.
+    for noisy in (
+        "azure.monitor.opentelemetry.exporter",
+        "azure.monitor.opentelemetry.exporter._quickpulse",
+        "azure.core.pipeline.policies.http_logging_policy",
+        "opentelemetry.sdk.trace.export",
+    ):
+        logging.getLogger(noisy).setLevel(logging.CRITICAL)
+
     try:  # pragma: no cover - requires the azure extra
         from azure.monitor.opentelemetry import configure_azure_monitor
 
