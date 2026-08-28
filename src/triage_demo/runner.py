@@ -151,11 +151,19 @@ class TriageRunner:
 
     def build_inbox(self):
         if self.settings.triage_tool_mode == "live" and self.settings.graph_tenant_id:
+            from triage_demo.tools.mail_filter import MailFilter
+
             return GraphInbox(
                 tenant_id=self.settings.graph_tenant_id,
                 client_id=self.settings.graph_client_id,
                 client_secret=self.settings.graph_client_secret,
                 mailbox=self.settings.graph_mailbox,
+                # Without this the agent acts on every message in the mailbox,
+                # which makes it steerable by anyone who can email it.
+                mail_filter=MailFilter.build(
+                    senders=self.settings.graph_sender_allowlist,
+                    subject_pattern=self.settings.graph_subject_pattern,
+                ),
             )
         return MockInbox(directory=self.base_dir / "mock" / "emails")
 

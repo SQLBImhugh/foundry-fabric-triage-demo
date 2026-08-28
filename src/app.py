@@ -57,10 +57,36 @@ logger = logging.getLogger("triage.hosted")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# Anything shorter than this is a trigger, not an alert. A routine fires with
-# an empty or boilerplate payload, and we should drain the mailbox rather than
-# try to triage the word "run".
-_MIN_ALERT_CHARS = 40
+# A scheduled run says this. Anything else is treated as an alert to triage.
+# Deliberately an explicit sentinel rather than a heuristic: the first version
+# inferred "no alert" from a short message, and the host turned out to pass
+# conversation history, so a five-character sweep request arrived as several
+# hundred characters of a previous alert and got re-triaged.
+_SWEEP_COMMANDS = frozenset({"sweep", "scheduled sweep", "run", "check mail", ""})
+
+
+def _latest_text(messages: Any) -> str:
+    """Return the most recent inbound message, not the whole conversation.
+
+    The host may pass prior turns. Concatenating them makes every request look
+    like the last alert we saw, which silently re-triages stale work.
+    """
+    if messages is None:
+        return ""
+    if isinstance(messages, str):
+        return messages.strip()
+
+    items = list(messages) if isinstance(messages, (list, tuple)) else [messages]
+    if not items:
+        return ""
+
+    # Prefer the last user-authored message; fall back to the last of anything.
+    def _role(item: Any) -> str:
+        return str(getattr(item, "role", "") or "").lower()
+
+    user_items = [i for i in items if _role(i) in ("user", "")]
+    candidate = (user_items or items)[-1]
+    return _text_of(candidate)
 
 
 def _text_of(messages: Any) -> str:
@@ -144,17 +170,17 @@ class TriageControllerAgent(BaseAgent):
         return AgentResponse(messages=[Message("assistant", [text])])
 
     async def _run_once(self, messages: Any) -> AgentResponse[Any]:
-        text = _text_of(messages)
+        text = _latest_text(messages)
+        is_sweep = text.strip().lower() in _SWEEP_COMMANDS
 
         # One triage at a time. Two concurrent runs would race on the incident
         # store and could remediate the same failure twice -- the exact
         # duplicate-action problem the dedup logic exists to prevent.
         async with self._lock:
             try:
-                if len(text) >= _MIN_ALERT_CHARS:
-                    summary = await self._triage_text(text)
-                else:
-                    summary = await self._drain_mailbox()
+                summary = await (
+                    self._drain_mailbox() if is_sweep else self._triage_text(text)
+                )
             except Exception as exc:
                 logger.exception("Triage run failed")
                 summary = (
@@ -165,6 +191,29 @@ class TriageControllerAgent(BaseAgent):
         return AgentResponse(messages=[Message("assistant", [summary])])
 
     # --- the two entry paths ----------------------------------------------
+
+    @staticmethod
+    async def _probe_directory(inbox: Any) -> None:
+        """Call a non-Exchange Graph endpoint with the agent's own token.
+
+        Purely diagnostic. A 200 here alongside a 401 from the mail endpoint
+        means Graph accepts this identity and Exchange is the one refusing it.
+        """
+        import httpx
+
+        get_token = getattr(inbox, "_get_token", None)
+        if get_token is None:
+            return
+        try:
+            token = await get_token()
+            async with httpx.AsyncClient(timeout=20) as client:
+                resp = await client.get(
+                    "https://graph.microsoft.com/v1.0/users?$top=1&$select=id",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+            logger.info("Directory probe (non-Exchange Graph): HTTP %s", resp.status_code)
+        except Exception as exc:
+            logger.warning("Directory probe failed (%s)", type(exc).__name__)
 
     async def _triage_text(self, text: str) -> str:
         """Triage an alert pasted straight into the Playground."""
@@ -188,6 +237,32 @@ class TriageControllerAgent(BaseAgent):
     async def _drain_mailbox(self) -> str:
         """Triage everything new in the alerts mailbox."""
         inbox = self._runner.build_inbox()
+
+        # Say which identity we are actually presenting. A container can hold a
+        # valid token for the wrong principal, which surfaces as a 401 and
+        # looks like a missing permission rather than an identity mix-up.
+        verify = getattr(inbox, "verify", None)
+        if verify is not None:
+            auth = await verify()
+            logger.info(
+                "Graph auth: ok=%s app_id=%s object_id=%s roles=%s has_upn=%s",
+                auth.get("ok"),
+                auth.get("app_id", ""),
+                auth.get("object_id", ""),
+                ",".join(auth.get("roles") or []) or "(none)",
+                auth.get("has_upn"),
+            )
+            if auth.get("has_upn"):
+                return (
+                    "Refusing to read mail: this is a delegated user token, not "
+                    "the agent's own identity."
+                )
+
+            # Probe a non-Exchange Graph endpoint with the same token. This
+            # separates "Graph rejects this identity" from "Exchange rejects
+            # this identity", which look identical from the mail endpoint but
+            # have completely different remedies.
+            await self._probe_directory(inbox)
 
         # Fail closed. App-only Mail.Read is tenant-wide unless Exchange scopes
         # it to a mailbox, so an unscoped agent could read the whole tenant.

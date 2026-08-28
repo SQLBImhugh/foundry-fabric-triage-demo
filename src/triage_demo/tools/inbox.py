@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from triage_demo.models import BIRequest
+from triage_demo.tools.mail_filter import MailFilter
 
 logger = logging.getLogger("triage.inbox")
 
@@ -156,6 +157,7 @@ class GraphInbox:
         client_id: str,
         client_secret: str | None = None,
         mailbox: str,
+        mail_filter: MailFilter | None = None,
     ):
         self._tenant_id = tenant_id
         self._client_id = client_id
@@ -164,29 +166,43 @@ class GraphInbox:
         self._seen: set[str] = set()
         self._token: str = ""
         self._token_expires_at: float = 0.0
+        # Fail closed: without an explicit filter the agent would act on
+        # every message in the mailbox, which makes it steerable by anyone
+        # who can send it mail.
+        self._filter = mail_filter
 
     async def _get_token(self) -> str:
         if self._token and time.time() < self._token_expires_at - 60:
             return self._token
 
         if not self._client_secret:
-            # Credential-free path. This is the production posture: a managed
-            # identity (or an Entra agent identity, which is also just a service
-            # principal) holds the Mail.Read app role, so there is no secret to
-            # store or rotate. That matters under tenant governance that purges
-            # Entra app secrets on a schedule -- a secret-based design starts
-            # failing about a month after go-live.
+            # Credential-free path. This is the production posture: the process
+            # authenticates as its own Entra agent identity, so there is no
+            # secret to store or rotate. That matters under tenant governance
+            # that purges Entra app secrets on a schedule -- a secret-based
+            # design starts failing about a month after go-live.
             #
-            # Deliberately NOT DefaultAzureCredential: its chain includes the
-            # developer's Azure CLI login, so a missing managed identity would
-            # silently downgrade to a *delegated user* token and the agent would
-            # read mail as whoever last ran `az login`. verify() would catch it
-            # via the 'upn' claim, but a credential chain that can quietly
-            # become a person is the wrong default for an unattended agent.
-            from azure.identity import ManagedIdentityCredential
+            # A plain ManagedIdentityCredential is NOT enough. Inside a Foundry
+            # hosted agent the identity arrives as a *federated* workload
+            # identity, not an IMDS managed identity, and asking only for the
+            # latter returns a token Graph rejects with 401.
+            #
+            # DefaultAzureCredential handles both, but its chain also includes
+            # the developer's Azure CLI login, so a misconfigured container
+            # could silently authenticate as whoever last ran `az login` and
+            # read that person's mail. Excluding every human credential keeps
+            # the convenience of the chain without that failure mode. verify()
+            # rejects a token carrying a 'upn' claim as defence in depth.
+            from azure.identity import DefaultAzureCredential
 
-            kwargs = {"client_id": self._client_id} if self._client_id else {}
-            credential = ManagedIdentityCredential(**kwargs)
+            credential = DefaultAzureCredential(
+                exclude_cli_credential=True,
+                exclude_developer_cli_credential=True,
+                exclude_interactive_browser_credential=True,
+                exclude_shared_token_cache_credential=True,
+                exclude_visual_studio_code_credential=True,
+                managed_identity_client_id=self._client_id or None,
+            )
             token = await asyncio.to_thread(credential.get_token, self._SCOPE)
             self._token = token.token
             try:
@@ -235,10 +251,20 @@ class GraphInbox:
         )
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+            if resp.status_code >= 400:
+                # Surface Graph's own explanation. Without it a 401 here is
+                # indistinguishable between a bad token, a missing app role
+                # and an Exchange policy denial -- three very different fixes.
+                try:
+                    detail = str(resp.json().get("error", {}).get("message", ""))[:400]
+                except Exception:
+                    detail = resp.text[:400]
+                logger.error("Graph mail read failed: HTTP %s %s", resp.status_code, detail)
             resp.raise_for_status()
             messages = resp.json().get("value", [])
 
         out: list[BIRequest] = []
+        skipped = 0
         for msg in messages:
             mid = msg.get("id", "")
             if mid in self._seen:
@@ -246,13 +272,24 @@ class GraphInbox:
             self._seen.add(mid)
 
             subject = msg.get("subject", "") or ""
+            sender = ((msg.get("from") or {}).get("emailAddress") or {}).get("address", "")
+
+            if self._filter is not None:
+                accepted, reason = self._filter.accepts(sender=sender, subject=subject)
+                if not accepted:
+                    # Counted, not silently dropped: an operator needs to know
+                    # the agent saw this and chose not to act.
+                    skipped += 1
+                    logger.info("Skipped message (%s)", reason)
+                    continue
+
             body = ((msg.get("body") or {}).get("content") or "")[:20000]
             hints = parse_hints(subject, body)
             out.append(
                 BIRequest(
                     request_id=mid,
                     received_at=msg.get("receivedDateTime", ""),
-                    sender=((msg.get("from") or {}).get("emailAddress") or {}).get("address", ""),
+                    sender=sender,
                     subject=subject,
                     body=body,
                     report_name=hints["report_name"],
@@ -261,6 +298,10 @@ class GraphInbox:
                     error_code=hints["error_code"],
                     source="graph",
                 )
+            )
+        if skipped:
+            logger.info(
+                "Ignored %d message(s) that were not Power BI refresh alerts", skipped
             )
         return out
 
@@ -301,6 +342,13 @@ class GraphInbox:
             "ok": True,
             "roles": [str(role) for role in roles],
             "has_upn": "upn" in payload,
+            # Which principal the token actually belongs to. Worth surfacing:
+            # a container can hold a perfectly valid token for the *wrong*
+            # identity, which fails as 401 at the API and looks like a
+            # permission bug rather than an identity mix-up.
+            "app_id": str(payload.get("appid") or payload.get("azp") or ""),
+            "object_id": str(payload.get("oid") or ""),
+            "tenant_id": str(payload.get("tid") or ""),
         }
 
     async def verify_scope(self, canary_mailbox: str) -> dict[str, Any]:

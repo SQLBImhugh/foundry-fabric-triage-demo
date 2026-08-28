@@ -34,3 +34,6 @@ Thumbs.db
 .github/copilot/settings.json
 .foundry/
 .azure
+
+# azd environment values - can contain secrets
+.azure/

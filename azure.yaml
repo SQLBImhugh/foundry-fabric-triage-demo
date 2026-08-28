@@ -39,10 +39,23 @@ services:
               value: gpt-5.6-luna
             - name: FOUNDRY_HANDOFF_MODE
               value: responses
-            # No GRAPH_CLIENT_SECRET. The container authenticates as its own
-            # Entra agent identity, which has no stored credential to leak.
+            # Mailbox ingestion is the one thing the agent identity cannot do.
+            # Verified from inside this container: with the same token, Graph's
+            # directory endpoint returns 200 while the Exchange-backed mail
+            # endpoint returns 401. Graph accepts an Entra agent identity;
+            # Exchange does not yet accept one for app-only mailbox access.
+            #
+            # So ingestion falls back to a conventional app registration,
+            # scoped by an Exchange ApplicationAccessPolicy to a single
+            # mailbox. It is the only credential in this deployment, it expires,
+            # and it is precisely what the agent identity removes everywhere
+            # else. Injected from the azd environment, never committed.
             - name: GRAPH_TENANT_ID
               value: edf144d9-f468-4b8e-8443-f51dadfbc4f9
+            - name: GRAPH_CLIENT_ID
+              value: ${GRAPH_CLIENT_ID}
+            - name: GRAPH_CLIENT_SECRET
+              value: ${GRAPH_CLIENT_SECRET}
             - name: GRAPH_MAILBOX
               value: Mork@mngenvmcap777813.onmicrosoft.com
             # A mailbox the agent must NOT be able to read. Startup refuses to
@@ -57,5 +70,28 @@ services:
         protocols:
             - protocol: responses
               version: 2.0.0
+    # The trigger that removes the laptop from the loop entirely. Nobody runs a
+    # command for this to happen: the routine wakes the controller on a
+    # schedule, it drains the alerts mailbox and triages whatever is new.
+    #
+    # Empty input is deliberate and load-bearing -- the controller treats a
+    # short payload as "no specific alert, go and look", which is exactly what a
+    # scheduled run means. Five minutes is a demo cadence; production would be
+    # driven by a Graph change notification instead of a poll.
+    bi-triage-schedule:
+        host: azure.ai.routine
+        uses:
+            - bi-triage-controller
+        description: Drain the BI alerts mailbox and triage anything new
+        enabled: true
+        triggers:
+            default:
+                type: schedule
+                cron_expression: "*/5 * * * *"
+                time_zone: America/Chicago
+        action:
+            type: invoke_agent_responses_api
+            agent_name: bi-triage-controller
+            input: "scheduled sweep"
 infra:
     provider: microsoft.foundry

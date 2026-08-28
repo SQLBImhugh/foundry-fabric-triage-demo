@@ -57,6 +57,17 @@ class Settings(BaseSettings):
     # and refuses to run if the read succeeds, because that means the app
     # registration is not scoped and can read the whole tenant.
     graph_canary_mailbox: str = ""
+    # Only messages that look like Power BI refresh alerts are triaged.
+    #
+    # This is a security control, not tidiness. An agent that acts on every
+    # message in a mailbox is steerable by anyone who can send mail to it --
+    # the inbox becomes an prompt-injection surface with no authentication.
+    # Left unfiltered, this demo triaged Entra ID Protection and PIM digests
+    # and crashed on several of them.
+    #
+    # Empty allowlist means "any sender", which is deliberately NOT the default.
+    graph_sender_allowlist: str = "no-reply-powerbi@microsoft.com,no-reply@powerbi.com"
+    graph_subject_pattern: str = r"(?i)\b(power\s*bi|fabric|refresh|semantic model|dataset)\b"
 
     # Durable incident store. Empty = JSON file next to the repo, which is the
     # right choice on a laptop and the wrong one in a container: the filesystem
