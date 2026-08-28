@@ -91,6 +91,9 @@ class AgentIdentityReport:
     sponsors: list[str] = field(default_factory=list)
     graph_app_roles: list[str] = field(default_factory=list)
     scope_proof: MailboxScopeProof | None = None
+    #: Only set for a conventional app registration; agent identities have none.
+    secret_expires_at: str = ""
+    is_agent_identity: bool = True
 
     @property
     def is_secretless(self) -> bool:
@@ -155,6 +158,52 @@ def project_name_prefix(project_endpoint: str) -> str:
     except (ValueError, IndexError):
         return ""
     return f"{account}-{project}" if account and project else account
+
+
+def load_app_registration(
+    reader: GraphReader,
+    *,
+    app_id: str,
+    scope_proof: MailboxScopeProof | None = None,
+) -> AgentIdentityReport | None:
+    """Report on a conventional app registration, for contrast.
+
+    Mailbox ingestion cannot use an agent identity: Exchange rejects them for
+    app-only mail access, verified as a 401 against the same token Graph's
+    directory endpoint accepted. So one ordinary app registration remains, and
+    it is worth showing side by side with the agent identities rather than
+    hiding it. It is the only thing in the deployment holding a secret, and the
+    only thing with an expiry date.
+    """
+    if not app_id:
+        return None
+    try:
+        app = reader.get(f"{GRAPH}/applications(appId='{app_id}')")
+    except Exception as exc:
+        logger.warning("Could not read app registration (%s)", type(exc).__name__)
+        return None
+
+    passwords = app.get("passwordCredentials") or []
+    report = AgentIdentityReport(
+        display_name=str(app.get("displayName", "")),
+        object_id=str(app.get("id", "")),
+        app_id=app_id,
+        enabled=True,
+        key_credentials=len(app.get("keyCredentials") or []),
+        password_credentials=len(passwords),
+        is_agent_identity=False,
+    )
+    report.secret_expires_at = str((passwords[0] or {}).get("endDateTime", "")) if passwords else ""
+
+    try:
+        sp = reader.get(f"{GRAPH}/servicePrincipals(appId='{app_id}')")
+        _fill_graph_roles(reader, report, str(sp.get("id", "")))
+    except Exception as exc:
+        logger.warning("Could not read app service principal (%s)", type(exc).__name__)
+
+    if scope_proof is not None and report.holds_mail_permission:
+        report.scope_proof = scope_proof
+    return report
 
 
 class GraphReader(Protocol):

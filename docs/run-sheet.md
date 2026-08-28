@@ -12,10 +12,12 @@ cd <repo>
 .\.venv\Scripts\triage-demo.exe preflight     # every live-mode row green
 .\.venv\Scripts\triage-demo.exe reset         # clean flag table + incident store
 python scripts\register_foundry_agents.py --dry-run   # must say "already in sync"
+azd ai agent show bi-triage-controller        # hosted controller is running
 ```
 
 - [ ] `preflight` clean for the mode you are presenting
 - [ ] Foundry agents in sync — **a stale registration silently runs the old definition**
+- [ ] Hosted controller responding: `azd ai agent invoke bi-triage-controller "sweep"`
 - [ ] Teams channel open in a visible window
 - [ ] Flag table open (Excel or the portal) showing its "before" state
 - [ ] Terminal font large enough to read from the back of the room
@@ -24,6 +26,47 @@ python scripts\register_foundry_agents.py --dry-run   # must say "already in syn
 
 On the fallback: if the tenant misbehaves mid-session, change two environment
 variables and keep going. Do not debug Azure in front of the customer.
+
+**Model fallback.** If `gpt-5.6-luna` is unavailable, a `gpt-5.4` pair is
+already registered and passes every scenario — see `docs/model-selection.md`:
+
+```powershell
+$env:FOUNDRY_TRIAGE_AGENT_NAME = "bi-triage-54"
+$env:FOUNDRY_DQ_AGENT_NAME     = "bi-data-quality-54"
+```
+
+---
+
+## 0b. Who these agents are (4 min) — optional opener
+
+Worth doing first if the room contains anyone from security or identity,
+because it reframes everything that follows.
+
+```powershell
+.\.venv\Scripts\triage-demo.exe identity --check-scope
+```
+
+Four panels, read left to right:
+
+- Three **agent identities**, one per agent, created by Foundry automatically.
+  `stored secrets: none` — the blueprint behind each has zero keys and zero
+  passwords. They authenticate with a federated credential instead. There is
+  no secret to rotate because there is no secret.
+- `sponsor: Mark Hughes` — Entra records the human accountable for the agent.
+  Nobody typed that in; Foundry set it at creation.
+- The two **reasoning** agents show `permissions: none`. They think; they
+  cannot act. Only the controller holds anything.
+- The fourth panel is a conventional **app registration**, shown deliberately:
+  `passwords=1` and an expiry date, `sponsor: none recorded`.
+
+> That last panel is the one thing here still holding a secret. It exists
+> because mailbox access is the one door an agent identity cannot open yet —
+> Graph accepts it, Exchange does not. Everything else on this screen has
+> nothing to steal.
+
+If asked how the mailbox is contained: the `mailbox scope` rows are a live
+check. The agent is granted one mailbox and denied another, and the controller
+**refuses to start** if it can read a mailbox it should not.
 
 ---
 

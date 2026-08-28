@@ -581,6 +581,10 @@ def _identity_panel(report) -> Panel:
     )
     t.add_row("stored secrets", secret_state)
 
+    if report.secret_expires_at:
+        # The whole argument for agent identities, in one row.
+        t.add_row("secret expires", f"[yellow]{report.secret_expires_at}[/yellow]")
+
     if report.federated_credentials:
         t.add_row("authenticates via", ", ".join(report.federated_credentials) + " [dim](federated)[/dim]")
 
@@ -600,7 +604,8 @@ def _identity_panel(report) -> Panel:
         t.add_row("mailbox scope", "\n".join(lines) if lines else "[dim]not checked[/dim]")
 
     border = "green" if report.is_secretless else "yellow"
-    return Panel(t, title=f"Agent identity: [bold]{report.short_name}[/bold]", border_style=border)
+    label = "Agent identity" if report.is_agent_identity else "App registration"
+    return Panel(t, title=f"{label}: [bold]{report.short_name}[/bold]", border_style=border)
 
 
 def cmd_identity(args: argparse.Namespace) -> int:
@@ -608,6 +613,7 @@ def cmd_identity(args: argparse.Namespace) -> int:
         HttpGraphReader,
         MailboxScopeProof,
         load_agent_identity,
+        load_app_registration,
         project_name_prefix,
     )
 
@@ -661,9 +667,31 @@ def cmd_identity(args: argparse.Namespace) -> int:
         )
         return 1
 
+    # The contrast panel. Mailbox ingestion cannot use an agent identity --
+    # Exchange rejects them for app-only mail access -- so one conventional app
+    # registration remains. Showing it beside the others makes the difference
+    # concrete: it is the only thing here holding a secret, and the only thing
+    # with an expiry date.
+    if settings.graph_client_id:
+        try:
+            app_report = load_app_registration(
+                reader, app_id=settings.graph_client_id, scope_proof=proof
+            )
+        except Exception as exc:
+            console.print(f"[dim]Could not read the app registration ({type(exc).__name__}).[/dim]")
+            app_report = None
+        if app_report is not None:
+            console.print(_identity_panel(app_report))
+            console.print(
+                "[dim]Mailbox ingestion still needs this one. Verified from inside the "
+                "container: Graph's directory endpoint accepted the agent identity (200) "
+                "while the Exchange-backed mail endpoint refused the same token (401).[/dim]"
+            )
+
     console.print(
         "\n[dim]Each agent authenticates as itself, with its own permissions and its own "
-        "audit trail. No client secret exists anywhere in this chain.[/dim]"
+        "audit trail. Every identity above except the app registration has no secret to "
+        "steal, rotate, or let expire.[/dim]"
     )
     return 0
 
@@ -747,7 +775,7 @@ def build_parser() -> argparse.ArgumentParser:
     identity.add_argument(
         "agents",
         nargs="*",
-        default=["bi-triage", "bi-data-quality"],
+        default=["bi-triage-controller", "bi-triage", "bi-data-quality"],
         help="Substrings matching agent identity display names",
     )
     identity.add_argument(

@@ -192,29 +192,6 @@ class TriageControllerAgent(BaseAgent):
 
     # --- the two entry paths ----------------------------------------------
 
-    @staticmethod
-    async def _probe_directory(inbox: Any) -> None:
-        """Call a non-Exchange Graph endpoint with the agent's own token.
-
-        Purely diagnostic. A 200 here alongside a 401 from the mail endpoint
-        means Graph accepts this identity and Exchange is the one refusing it.
-        """
-        import httpx
-
-        get_token = getattr(inbox, "_get_token", None)
-        if get_token is None:
-            return
-        try:
-            token = await get_token()
-            async with httpx.AsyncClient(timeout=20) as client:
-                resp = await client.get(
-                    "https://graph.microsoft.com/v1.0/users?$top=1&$select=id",
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-            logger.info("Directory probe (non-Exchange Graph): HTTP %s", resp.status_code)
-        except Exception as exc:
-            logger.warning("Directory probe failed (%s)", type(exc).__name__)
-
     async def _triage_text(self, text: str) -> str:
         """Triage an alert pasted straight into the Playground."""
         subject, _, body = text.partition("\n")
@@ -257,12 +234,6 @@ class TriageControllerAgent(BaseAgent):
                     "Refusing to read mail: this is a delegated user token, not "
                     "the agent's own identity."
                 )
-
-            # Probe a non-Exchange Graph endpoint with the same token. This
-            # separates "Graph rejects this identity" from "Exchange rejects
-            # this identity", which look identical from the mail endpoint but
-            # have completely different remedies.
-            await self._probe_directory(inbox)
 
         # Fail closed. App-only Mail.Read is tenant-wide unless Exchange scopes
         # it to a mailbox, so an unscoped agent could read the whole tenant.

@@ -17,6 +17,7 @@ from triage_demo.identity import (
     GRAPH,
     MailboxScopeProof,
     load_agent_identity,
+    load_app_registration,
     project_name_prefix,
 )
 
@@ -257,3 +258,57 @@ def test_directory_read_failures_degrade_instead_of_crashing() -> None:
     assert report is not None
     assert report.sponsors == []
     assert report.graph_app_roles == ["Mail.Read on Microsoft Graph"]
+
+
+APP_ID = "1e9b4eeb-f169-444e-8b46-a666d31a5bbb"
+APP_OBJ = "f1e6a93b-a17b-44b6-a837-b1e6b50eb985"
+APP_SP = "809f7034-8adc-4dea-bc8e-124b73cfd8c4"
+
+
+def _directory_with_app() -> FakeGraph:
+    directory = _directory()
+    directory.routes[f"{GRAPH}/applications(appId='{APP_ID}')"] = {
+        "id": APP_OBJ,
+        "displayName": "bi-triage-demo-inbox",
+        "keyCredentials": [],
+        "passwordCredentials": [{"keyId": "p1", "endDateTime": "2027-08-28T00:16:51Z"}],
+    }
+    directory.routes[f"{GRAPH}/servicePrincipals(appId='{APP_ID}')"] = {"id": APP_SP}
+    directory.routes[f"{GRAPH}/servicePrincipals/{APP_SP}/appRoleAssignments"] = {
+        "value": [
+            {
+                "resourceId": GRAPH_SP_ID,
+                "appRoleId": MAIL_READ_ROLE,
+                "resourceDisplayName": "Microsoft Graph",
+            }
+        ]
+    }
+    return directory
+
+
+def test_app_registration_is_reported_as_holding_a_secret_with_an_expiry() -> None:
+    """The contrast the demo rests on.
+
+    Agent identities have no credential to expire; this one does, and the date
+    is the argument for moving off it.
+    """
+    report = load_app_registration(_directory_with_app(), app_id=APP_ID)
+    assert report is not None
+    assert not report.is_agent_identity
+    assert not report.is_secretless
+    assert report.password_credentials == 1
+    assert report.secret_expires_at == "2027-08-28T00:16:51Z"
+    # An app registration records who created it, not who is accountable.
+    assert report.sponsors == []
+    assert report.graph_app_roles == ["Mail.Read on Microsoft Graph"]
+
+
+def test_app_registration_shows_its_mailbox_scope() -> None:
+    proof = MailboxScopeProof(granted=["alerts@example.com"], denied=["ceo@example.com"])
+    report = load_app_registration(_directory_with_app(), app_id=APP_ID, scope_proof=proof)
+    assert report.scope_proof is proof
+
+
+def test_missing_app_registration_returns_none() -> None:
+    assert load_app_registration(_directory(), app_id="") is None
+    assert load_app_registration(_directory(), app_id="not-a-real-app") is None

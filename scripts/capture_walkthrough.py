@@ -64,11 +64,78 @@ async def capture(scenario_name: str, stem: str, keep: bool) -> str:
     return status
 
 
+async def capture_identity(stem: str = "shot-identity") -> str:
+    """Capture the agent identity panels from the live directory.
+
+    Worth capturing as a terminal export rather than a portal screenshot: it
+    shows the same facts the portal shows, but read back through the API the
+    customer would use, which is harder to stage and easier to believe.
+    """
+    import argparse
+
+    console = Console(record=True, width=104, force_terminal=True)
+    cli.console = console
+
+    args = argparse.Namespace(
+        agents=["bi-triage-controller", "bi-triage", "bi-data-quality"], check_scope=True
+    )
+    try:
+        code = cli.cmd_identity(args)
+    except Exception as exc:  # pragma: no cover - capture-time only
+        console.print(f"[red]identity capture failed: {type(exc).__name__}: {exc}[/red]")
+        code = 1
+
+    OUT.mkdir(parents=True, exist_ok=True)
+    console.save_svg(str(OUT / f"{stem}.svg"), title="triage-demo identity --check-scope")
+    return "OK" if code == 0 else f"exit {code}"
+
+
+async def capture_hosted(stem: str = "shot-hosted-invoke") -> str:
+    """Capture the deployed agent answering, to prove this runs in Azure.
+
+    Shelling out to `azd ai agent invoke` rather than calling the runner
+    in-process is the point: the output is the hosted container's, not this
+    machine's.
+    """
+    import re
+    import subprocess
+
+    console = Console(record=True, width=104, force_terminal=True)
+    alert = (
+        "Power BI: Refresh failed for 'Completions Daily Rollup'. "
+        "Error code: ModelRefreshFailed_CredentialsNotSpecified. Workspace: BI Triage Demo."
+    )
+    console.rule("[bold]The deployed agent, invoked in Azure[/bold]")
+    console.print(f"[dim]$ azd ai agent invoke bi-triage-controller \"{alert[:60]}...\"[/dim]\n")
+
+    proc = subprocess.run(
+        "azd ai agent invoke bi-triage-controller " + subprocess.list2cmdline([alert]),
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        cwd=str(REPO_ROOT), shell=True,
+        # azd occasionally waits on something interactive; a capture script must
+        # never be the reason a rehearsal stalls.
+        timeout=180,
+    )
+    text = re.sub(r"\x1b\[[0-9;]*m", "", (proc.stdout or "") + (proc.stderr or ""))
+    for line in text.splitlines():
+        if not line.strip() or "Update available" in line or "winget" in line:
+            continue
+        style = "bold green" if line.strip().startswith("[bi-triage-controller]") else ""
+        console.print(line, style=style, highlight=False)
+
+    OUT.mkdir(parents=True, exist_ok=True)
+    console.save_svg(str(OUT / f"{stem}.svg"), title="azd ai agent invoke bi-triage-controller")
+    return "OK" if proc.returncode == 0 else f"exit {proc.returncode}"
+
+
 async def main() -> int:
     print(f"provider={settings.triage_provider_mode}  tools={settings.triage_tool_mode}")
     for scenario_name, stem, keep in RUNS:
         status = await capture(scenario_name, stem, keep)
         print(f"  {stem:22s} {status}")
+
+    print(f"  {'shot-identity':22s} {await capture_identity()}")
+    print(f"  {'shot-hosted-invoke':22s} {await capture_hosted()}")
     print(f"\nSVGs written to {OUT}")
     return 0
 

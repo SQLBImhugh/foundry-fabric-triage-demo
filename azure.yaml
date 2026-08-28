@@ -22,6 +22,11 @@ services:
         kind: hosted
         name: bi-triage-controller
         environmentVariables:
+            # INFO so the container explains its own decisions in the log --
+            # which identity it presented, what it ignored and why. A hosted
+            # agent you cannot interrogate is a hosted agent you cannot trust.
+            - name: TRIAGE_LOG_LEVEL
+              value: INFO
             # The controller reasons through the Foundry prompt agents and acts
             # through real tools. Mock stays available for offline rehearsal by
             # overriding these, but the deployed default is the real thing.
