@@ -68,6 +68,21 @@ services:
             # tenant-wide until Exchange scopes it.
             - name: GRAPH_CANARY_MAILBOX
               value: mhugh@MngEnvMCAP777813.onmicrosoft.com
+            # Senders the agent will act on. Power BI's own no-reply addresses,
+            # plus the presenter's address as a documented demo-injection route:
+            # a live demo needs a way to make an alert arrive on cue, and
+            # emailing the alerts mailbox is the honest way to do it.
+            #
+            # Note this is the same address as the canary above, and that is not
+            # a contradiction: the presenter may *send* an alert to the agent,
+            # while the agent still cannot *read* the presenter's mailbox. Those
+            # are different permissions and the demo shows both.
+            #
+            # This is still an allowlist. Adding a known address is a different
+            # thing from removing the check, and the filter continues to reject
+            # everything else -- 10 messages on the last sweep.
+            - name: GRAPH_SENDER_ALLOWLIST
+              value: no-reply-powerbi@microsoft.com,no-reply@powerbi.com,mhugh@MngEnvMCAP777813.onmicrosoft.com
             - name: INCIDENT_TABLE_ENDPOINT
               value: https://bitriagestore6343.table.core.windows.net/
             - name: INCIDENT_TABLE_NAME

@@ -37,3 +37,6 @@ Thumbs.db
 
 # azd environment values - can contain secrets
 .azure/
+
+# Generated handoff bundle - reproducible, not source
+handoff/

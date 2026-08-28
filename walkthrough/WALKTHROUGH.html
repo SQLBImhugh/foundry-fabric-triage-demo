@@ -708,8 +708,52 @@
 </section>
 
 <!-- ══════════════════════════════════════════════════════════════════ -->
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section id="teams">
+  <h2><span class="num">F</span> What the humans actually see</h2>
+  <p class="lede">
+    Every terminal outcome produces a notification — resolved, refused, escalated, denied. The point
+    is not that it posts when things go well; it is that it posts when they do not.
+  </p>
+
+  <div class="figure">
+    <div class="cap-top">
+      <span class="where">rendered from the live payload</span> triage-demo teams-preview
+    </div>
+    <div class="shot"><img src="shots/shot-teams-card.svg" alt="The Adaptive Card the agent posts to Teams"></div>
+    <ul class="callouts">
+      <li><span class="n c1">1</span><span class="txt">
+        <b>This is generated from the card the agent actually produces</b>, not drawn for the
+        document, so it cannot drift from what would really be posted. Run
+        <code>triage-demo teams-preview --json</code> to get the exact payload.
+      </span></li>
+      <li><span class="n c2">2</span><span class="txt">
+        <b>It carries the evidence, not just the verdict.</b> Report, error, action taken, outcome,
+        timestamp and the incident signature — enough for whoever picks it up to decide whether they
+        agree, without opening a console.
+      </span></li>
+      <li><span class="n c3">3</span><span class="txt">
+        <b>Redaction happens before this leaves the process.</b> The card is built from redacted
+        text, so a connection string in an error message never reaches a channel that a wider
+        audience can read than the system it came from.
+      </span></li>
+    </ul>
+  </div>
+
+  <p class="note">
+    <b>Being straight about delivery.</b> In this build the notifier is mocked, so no card has been
+    posted to a real channel. Microsoft retired Office 365 “Incoming Webhook” connectors on
+    <b>22 May 2026</b>, and the replacement — a Power Automate <i>Workflows</i> webhook — has to be
+    created by hand from the channel; there is no application-permission path for posting to a
+    channel. Wiring it is a two-minute step, documented in the run sheet, and everything above is
+    what will arrive when it is. Posts appear as the Workflows bot rather than a custom name or
+    icon, which is a limitation of the replacement worth knowing before a customer sees it.
+  </p>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
 <section id="native">
-  <h2><span class="num">F</span> What Foundry provides, and what we wrote</h2>
+  <h2><span class="num">G</span> What Foundry provides, and what we wrote</h2>
   <p class="lede">
     Almost every component is a platform feature. The exception is worth understanding, because it
     is the part that encodes <em>your</em> operating rules.
@@ -766,7 +810,7 @@
 
 <!-- ══════════════════════════════════════════════════════════════════ -->
 <section id="limits">
-  <h2><span class="num">G</span> Limitations, honestly</h2>
+  <h2><span class="num">H</span> Limitations, honestly</h2>
   <p class="lede">
     What this build does not do, and what we would want to resolve before anyone depended on it.
   </p>

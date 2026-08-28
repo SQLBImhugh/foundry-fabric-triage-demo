@@ -345,3 +345,18 @@ footer { border-top: 1px solid var(--border-soft); margin-top: 70px; padding-top
   .mk { width: 24px; height: 24px; font-size: 12px; }
   .gallery { grid-template-columns: 1fr; }
 }
+
+/* An honest caveat block: used where the document has to say "this part is not
+   wired up yet". Warm border so it reads as a caution rather than an error. */
+.note {
+  margin: 1.6rem 0 0;
+  padding: 1rem 1.15rem;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warn);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 0.94rem;
+  line-height: 1.65;
+}
+.note b { color: var(--text); }

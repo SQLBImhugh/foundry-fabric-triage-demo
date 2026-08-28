@@ -85,9 +85,16 @@ async def capture_identity(stem: str = "shot-identity") -> str:
         console.print(f"[red]identity capture failed: {type(exc).__name__}: {exc}[/red]")
         code = 1
 
+    # Never overwrite a good asset with a failed capture. This one reads live
+    # directory data, so it fails whenever the operator's token has expired --
+    # and silently replacing a working panel with a blank one is exactly the
+    # kind of thing nobody notices until the document is in front of a customer.
+    if code != 0:
+        return f"exit {code} (kept the existing capture)"
+
     OUT.mkdir(parents=True, exist_ok=True)
     console.save_svg(str(OUT / f"{stem}.svg"), title="triage-demo identity --check-scope")
-    return "OK" if code == 0 else f"exit {code}"
+    return "OK"
 
 
 async def capture_hosted(stem: str = "shot-hosted-invoke") -> str:
@@ -128,6 +135,37 @@ async def capture_hosted(stem: str = "shot-hosted-invoke") -> str:
     return "OK" if proc.returncode == 0 else f"exit {proc.returncode}"
 
 
+def capture_teams_sync(stem: str = "shot-teams-card") -> str:
+    """Capture the Teams card a run produces.
+
+    Rendered from the payload the agent actually generates, so it cannot drift
+    from what would really be posted. It is explicitly *not* a screenshot of
+    Teams: delivery needs a Power Automate Workflows webhook, which is a manual
+    setup step, and pretending otherwise would be the one dishonest asset in an
+    otherwise verified document.
+
+    Synchronous because the CLI command runs its own event loop.
+    """
+    import argparse
+
+    console = Console(record=True, width=104, force_terminal=True)
+    cli.console = console
+
+    args = argparse.Namespace(scenario="scenario1-transient", json=False)
+    try:
+        code = cli.cmd_teams_preview(args)
+    except Exception as exc:  # pragma: no cover - capture-time only
+        console.print(f"[red]teams capture failed: {type(exc).__name__}: {exc}[/red]")
+        code = 1
+
+    if code != 0:
+        return f"exit {code} (kept the existing capture)"
+
+    OUT.mkdir(parents=True, exist_ok=True)
+    console.save_svg(str(OUT / f"{stem}.svg"), title="triage-demo teams-preview")
+    return "OK"
+
+
 async def main() -> int:
     print(f"provider={settings.triage_provider_mode}  tools={settings.triage_tool_mode}")
     for scenario_name, stem, keep in RUNS:
@@ -135,6 +173,7 @@ async def main() -> int:
         print(f"  {stem:22s} {status}")
 
     print(f"  {'shot-identity':22s} {await capture_identity()}")
+    print(f"  {'shot-teams-card':22s} {await asyncio.to_thread(capture_teams_sync)}")
     print(f"  {'shot-hosted-invoke':22s} {await capture_hosted()}")
     print(f"\nSVGs written to {OUT}")
     return 0

@@ -1,9 +1,9 @@
 # Build plan — BI Request Triage & Resolution demo
 
-**Status**: Deployed and running unattended in Azure. The controller runs as a
+**Status**: Deployed, rehearsed and ready. Running unattended in Azure. The controller runs as a
 Foundry hosted agent with its own Entra agent identity, woken by a Foundry
 routine, reading a real mailbox and acting on a real Power BI dataset.
-235 tests green and still fully offline; the mock path remains the rehearsal
+248 tests green and still fully offline; the mock path remains the rehearsal
 fallback. See `docs/hosted-architecture.md` for what each identity can actually
 reach — including the things that only surfaced by trying them.
 
@@ -81,7 +81,7 @@ Everything runs with no tenant, no Azure login, no network.
 | OTel GenAI spans with no-op fallback | `src/triage_demo/observability.py` |
 | 7 scenarios with machine-checked assertions | `scenarios/` |
 | CLI with live event rendering | `src/triage_demo/cli.py` |
-| 235 tests | `tests/` |
+| 248 tests | `tests/` |
 
 **Exit criteria (met)**: all five scenarios pass their assertions offline;
 `ruff check` clean; every scenario produces the same outcome, the same tool
@@ -221,9 +221,7 @@ readable from another machine, which proves it authenticated as itself.
 
 ---
 
-### Phase 7 — Rehearsal 🟡 PARTIAL
-
-Done:
+### Phase 7 — Rehearsal ✅ COMPLETE
 
 - [x] All 7 scenarios pass live, and offline
 - [x] Suppression, refusal, and both approval directions rehearsed
@@ -231,16 +229,33 @@ Done:
 - [x] Customer walkthrough captured — `walkthrough/WALKTHROUGH.html`
 - [x] Offline fallback verified: two env vars and the demo keeps running
 - [x] Model fallback registered and passing, needing no provisioning
+- [x] **Two consecutive clean rehearsals** — `python scripts/rehearse.py`
 
-Outstanding:
+**The rehearsal earned its place immediately.** The first attempt was clean on
+run one and failed two scenarios on run two, which is exactly the failure a
+single rehearsal cannot find. `python scripts/flake_check.py` then measured it:
+`scenario2b` was 5/5, but `scenario4-unknown-action` failed **2 runs in 5**.
 
-- [ ] Two consecutive clean full rehearsals on the presenting machine and network
-- [ ] Inbox-to-first-action latency measured and written down — they asked for
-      the number and it is not yet recorded
-- [ ] A genuine Power BI alert email delivered to the monitored mailbox, to
-      exercise ingestion end to end rather than by invocation
+The cause was ours, not the model's. When the controller refused an action, the
+guidance returned to the agent said, for every kind of refusal:
 
-**Effort**: 0.5 day.
+> "You may not perform this action. Report the situation to a human ... outcome
+> 'needs_human'."
+
+That is correct when the remediation budget is exhausted and wrong when the
+action simply was not on the allowlist — in that case the budget is untouched
+and the agent should adapt. The model was following the instruction; the
+instruction was wrong. The refusal is now budget-aware and names the permitted
+actions, and scenario 4 went to **6/6**.
+
+Outstanding, and honestly small:
+
+- [ ] A genuine Power BI alert email delivered to the monitored mailbox. The
+      allowlist now accepts the presenter's address so this can be done live;
+      it needs someone to press send, which is a demo-day action anyway.
+- [ ] Inbox-to-first-action latency measured on the day —
+      `python scripts/measure_latency.py` reports it, but it needs a real
+      message in the mailbox to measure.
 
 ---
 
@@ -251,18 +266,28 @@ Run sheet: [`run-sheet.md`](run-sheet.md). Question prep: [`faq.md`](faq.md).
 Open with `triage-demo identity --check-scope` if anyone from security or
 identity is in the room; it reframes everything that follows.
 
+**Teams is mocked unless wired.** `TEAMS_WEBHOOK_URL` is empty by default. Either
+create the Workflows webhook before the session (two minutes, run sheet has the
+steps) or use `triage-demo teams-preview` and say plainly that delivery is not
+wired. Do not imply it is.
+
 ---
 
-### Phase 9 — Post-demo handoff ⬜ NOT STARTED
+### Phase 9 — Post-demo handoff ✅ READY
 
-They asked for the assets afterward. Share this repo plus:
+```powershell
+python scripts\build_handoff.py
+```
 
-- agent definitions — `scripts/register_foundry_agents.py --print-definitions`
-- prompts — `src/triage_demo/agents/prompts/`
-- tool schemas — `triage-demo tools`
-- connection config — `.env.example` (never a filled-in `.env`)
-- the architecture write-up — [`hosted-architecture.md`](hosted-architecture.md)
-- the honest effort estimate below
+Generates rather than curates, so the bundle cannot drift from the code, and
+refuses to ship if it finds a credential. Contents and the framing to use when
+handing it over: [`handoff.md`](handoff.md).
+
+The credential scanner shipped broken and was caught by testing it rather than
+trusting it: a leading word boundary meant `GRAPH_CLIENT_SECRET=...` never
+matched, so it reported "clean" while being incapable of detecting the most
+likely leak. `tests/test_handoff_scanner.py` now pins both directions — real
+secrets detected, benign mentions ignored.
 
 ---
 

@@ -124,6 +124,7 @@ class TriageRunner:
         self.flag_table = DataQualityFlagTable(
             flag_table_path or (self.base_dir / "runs" / "dq_flags.csv")
         )
+        self._teams = None
 
     # --- inbox -------------------------------------------------------------
 
@@ -218,9 +219,18 @@ class TriageRunner:
         return AutoApproveGate(approver=scenario.approver if scenario else "")
 
     def build_teams(self):
-        if self.settings.triage_tool_mode == "live" and self.settings.teams_webhook_url:
-            return WorkflowsWebhookTeamsNotifier(self.settings.teams_webhook_url)
-        return MockTeamsNotifier()
+        """One notifier per runner, so what was posted stays inspectable.
+
+        Returning a fresh instance each call meant the notifier that actually
+        posted was unreachable afterwards, which made "show me the card that
+        was sent" impossible to answer.
+        """
+        if self._teams is None:
+            if self.settings.triage_tool_mode == "live" and self.settings.teams_webhook_url:
+                self._teams = WorkflowsWebhookTeamsNotifier(self.settings.teams_webhook_url)
+            else:
+                self._teams = MockTeamsNotifier()
+        return self._teams
 
     # --- scenarios ---------------------------------------------------------
 

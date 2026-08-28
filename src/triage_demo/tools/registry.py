@@ -26,6 +26,7 @@ from triage_demo.knowledge.refresh_history import assess_deactivation_risk
 from triage_demo.models import ApprovalRecord, BIRequest, DataQualityFinding, TriageAction
 from triage_demo.observability import tool_span
 from triage_demo.policy import (
+    REMEDIATION_ACTIONS,
     PolicyLedger,
     PolicyViolation,
     is_remediation,
@@ -310,6 +311,42 @@ class ToolDispatcher:
         self._dq_agent = dq_agent
         self.actions: list[TriageAction] = []
 
+    def _refusal_guidance(self) -> str:
+        """Tell the model what it may still do, not just what it may not.
+
+        A refusal that only says "no" is a bad refusal. The two policy blocks
+        need different advice and previously shared one message:
+
+        - **Action not on the allowlist** — the remediation budget is untouched,
+          so the right response is to pick a permitted action and carry on.
+        - **Remediation budget exhausted** — there is no permitted action left,
+          so the right response is to escalate.
+
+        The shared message said "escalate" for both. That is correct for the
+        second case and wrong for the first, and the model duly followed it:
+        scenario 4 failed its expectations 2 runs in 5 because the agent was
+        being told to stop when it should have adapted. The flakiness was in
+        the instruction, not the model.
+        """
+        ledger = self.ctx.ledger
+        remaining = ledger.policy.max_write_actions - ledger.write_actions
+
+        if remaining > 0:
+            permitted = sorted(REMEDIATION_ACTIONS & ledger.policy.allowed_actions)
+            return (
+                "That action was not dispatched, and this run is not over. You "
+                f"still have {remaining} remediation action(s) available. If a "
+                "permitted action addresses the failure, call it now: "
+                f"{', '.join(permitted)}. If none is appropriate, notify_teams "
+                "and report_resolution with outcome 'needs_human'."
+            )
+
+        return (
+            "That action was not dispatched, and no remediation budget remains, "
+            "so no further fix is possible in this run. Call notify_teams, then "
+            "report_resolution with outcome 'needs_human'."
+        )
+
     async def dispatch(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         started = time.monotonic()
         gated = requires_approval(name)
@@ -330,11 +367,7 @@ class ToolDispatcher:
                 return {
                     "status": "blocked_by_policy",
                     "reason": violation.message,
-                    "guidance": (
-                        "You may not perform this action. Report the situation to a "
-                        "human via notify_teams, then call report_resolution with "
-                        "outcome 'needs_human'."
-                    ),
+                    "guidance": self._refusal_guidance(),
                 }
             raise
 

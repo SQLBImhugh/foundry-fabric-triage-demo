@@ -702,6 +702,84 @@ def cmd_identity(args: argparse.Namespace) -> int:
     return 0
 
 
+def _render_adaptive_card(card: dict) -> Panel:
+    """Render an Adaptive Card the way Teams would lay it out.
+
+    Generated from the payload the agent actually produces, not hand-drawn, so
+    this cannot drift from what would really be posted. It is a rendering, not
+    a screenshot of Teams -- delivery needs a Power Automate Workflows webhook,
+    which is a manual step (see the run sheet).
+    """
+    from rich.table import Table as _Table
+
+    content = (card.get("attachments") or [{}])[0].get("content", {})
+    body = content.get("body", [])
+
+    inner = _Table(show_header=False, box=None, padding=(0, 1))
+    inner.add_column(style="dim", no_wrap=True)
+    inner.add_column()
+
+    heading = ""
+    trailing: list[str] = []
+    for block in body:
+        if block.get("type") == "TextBlock":
+            text = str(block.get("text", ""))
+            if block.get("weight") == "Bolder" and not heading:
+                heading = text
+            else:
+                trailing.append(text)
+        elif block.get("type") == "FactSet":
+            for fact in block.get("facts", []):
+                inner.add_row(str(fact.get("title", "")), str(fact.get("value", "")))
+
+    if heading:
+        console.print(f"\n[bold]{heading}[/bold]")
+    for line in trailing:
+        inner.add_row("", f"[dim]{line}[/dim]")
+
+    return Panel(
+        inner,
+        title="[bold]Adaptive Card[/bold] [dim]posted to Teams[/dim]",
+        subtitle="[dim]rendered from the live payload[/dim]",
+        border_style="cyan",
+    )
+
+
+def cmd_teams_preview(args: argparse.Namespace) -> int:
+    """Show the Teams card a scenario produces, without needing Teams."""
+    import json as _json
+
+    path = _resolve_scenario(args.scenario)
+    if path is None:
+        console.print(f"[red]No scenario named '{args.scenario}'[/red]")
+        return 2
+
+    scenario = Scenario.load(path)
+    runner = TriageRunner(settings, base_dir=REPO_ROOT)
+    asyncio.run(runner.run_scenario(scenario))
+
+    notifier = runner.build_teams()
+    summary = getattr(notifier, "last", None)
+    if summary is None:
+        console.print("[yellow]That run posted no Teams card.[/yellow]")
+        return 1
+
+    card = summary.to_adaptive_card()
+    if args.json:
+        console.print(Syntax(_json.dumps(card, indent=2), "json", word_wrap=True))
+        return 0
+
+    console.print(Rule(f"[bold]{scenario.title or scenario.name}[/bold]"))
+    console.print(_render_adaptive_card(card))
+    console.print(
+        "\n[dim]This is the payload the agent posts. Delivery needs a Power Automate "
+        "Workflows webhook in TEAMS_WEBHOOK_URL -- the older Office 365 connector "
+        "webhooks were retired on 22 May 2026. Use --json to paste into "
+        "adaptivecards.io/designer.[/dim]"
+    )
+    return 0
+
+
 def cmd_reset(args: argparse.Namespace) -> int:
     runner = TriageRunner(settings, base_dir=REPO_ROOT)
     runner.flag_table.reset()
@@ -790,6 +868,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include the mailbox scope the agent is confined to",
     )
     identity.set_defaults(func=cmd_identity)
+
+    teams = sub.add_parser(
+        "teams-preview", help="Show the Teams card a scenario produces"
+    )
+    teams.add_argument("scenario", nargs="?", default="scenario1-transient")
+    teams.add_argument("--json", action="store_true", help="Emit the raw Adaptive Card payload")
+    teams.set_defaults(func=cmd_teams_preview)
 
     sub.add_parser("flags", help="Show the data quality flag table").set_defaults(func=cmd_flags)
     sub.add_parser("incidents", help="Show the incident store").set_defaults(func=cmd_incidents)
