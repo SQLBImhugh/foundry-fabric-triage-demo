@@ -19,12 +19,27 @@ azd ai agent show bi-triage-controller        # hosted controller is running
 - [ ] Foundry agents in sync — **a stale registration silently runs the old definition**
 - [ ] Hosted controller responding: `azd ai agent invoke bi-triage-controller "sweep"`
 - [ ] **Teams wired, or the beat cut.** `TEAMS_WEBHOOK_URL` is empty by default and
-      notifications are mocked. To make them real, create a Power Automate
-      Workflows webhook (channel **⋯ → Workflows → "Post to a channel when a
-      webhook request is received"**), then `azd env set TEAMS_WEBHOOK_URL "<url>"`
-      and redeploy. Old Office 365 connector webhooks were retired 22 May 2026 and
-      will not work. If you skip this, use `triage-demo teams-preview` to show the
-      card instead and say plainly that delivery is not wired — do not imply it is.
+      notifications are mocked. To make them real:
+
+      ```powershell
+      python scripts\setup_teams_webhook.py --login    # once - sign in as the DEMO tenant
+      python scripts\setup_teams_webhook.py --create --headed
+      azd deploy bi-triage-controller --no-prompt
+      ```
+
+      The login step matters: Windows SSO signs Edge in as your **corporate**
+      account, and a flow created there lands in the wrong tenant while looking
+      like it worked. `--login` pre-fills the demo account; check the account it
+      offers before accepting.
+
+      `--create --headed` lets you watch it, which is worth doing the first time
+      because Power Automate's UI moves. If it cannot find a control it stops
+      before submitting, screenshots, and tells you — nothing is half-created.
+      Fall back to doing it by hand and `--set-url "<url>"`.
+
+      Old Office 365 connector webhooks were retired 22 May 2026 and will not work.
+      If you skip this entirely, use `triage-demo teams-preview` to show the card
+      and say plainly that delivery is not wired — do not imply it is.
 - [ ] Teams channel open in a visible window
 - [ ] Flag table open (Excel or the portal) showing its "before" state
 - [ ] Terminal font large enough to read from the back of the room

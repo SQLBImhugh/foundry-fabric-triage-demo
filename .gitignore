@@ -40,3 +40,7 @@ Thumbs.db
 
 # Generated handoff bundle - reproducible, not source
 handoff/
+
+# Browser automation state - holds a signed-in session
+.browser-profile/
+.browser-debug/

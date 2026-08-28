@@ -190,10 +190,26 @@ SSO applies — but it signs in to the **corporate** tenant, not the demo tenant
 A webhook created that way would land in the wrong place and still look like it
 had worked. `scripts/probe_browser_auth.py` reproduces the finding.
 
-So automation needs one interactive sign-in to the demo tenant first. After that
-the browser profile carries the session and the click-through could run
-unattended. Given the whole task is two minutes by hand and is done once per
-demo environment, that is rarely worth building.
+`scripts/setup_teams_webhook.py` handles this in two steps:
+
+```powershell
+python scripts\setup_teams_webhook.py --login            # once; you sign in
+python scripts\setup_teams_webhook.py --create --headed  # unattended after that
+python scripts\setup_teams_webhook.py --check            # is the session still good?
+python scripts\setup_teams_webhook.py --set-url "<url>"  # if you made it by hand
+```
+
+The captured URL goes straight into the azd environment and is never printed in
+full or written into the repo — it is a bearer credential, and anyone holding it
+can post to that channel. Only a fingerprint (length and last six characters) is
+shown, which is enough to confirm it was captured without putting it in a
+terminal buffer or a screen share.
+
+The `--create` path is written against Power Automate's current UI and has not
+been run against the demo tenant, because reaching it needs the interactive login
+above. It stops before submitting when it cannot find a control, screenshots to
+`.browser-debug/`, and tells you which step failed, rather than half-creating a
+flow. Run it `--headed` the first time.
 
 The payload shape is unchanged — `WorkflowsWebhookTeamsNotifier` posts the same
 Adaptive Card envelope — so only the URL source moved. Two differences worth

@@ -98,6 +98,18 @@ services:
               value: 1002e59c-cd3c-4364-97b7-0a890221eec4
             - name: POWERBI_DATASET_ID
               value: 4c6e3d18-5119-4622-9c11-83445ee78eb5
+            # Teams delivery. Empty means the notifier stays mocked, which is
+            # the correct fallback rather than a failure: a demo should not die
+            # because a webhook is missing. Populate it with
+            #   python scripts\setup_teams_webhook.py --login   (once)
+            #   python scripts\setup_teams_webhook.py --create
+            # then redeploy. The URL is a bearer credential -- anyone holding it
+            # can post to that channel -- so it lives in the azd environment,
+            # which is gitignored, and never in this file.
+            - name: TEAMS_WEBHOOK_URL
+              value: ${TEAMS_WEBHOOK_URL}
+            - name: TEAMS_MODE
+              value: webhook
         protocols:
             - protocol: responses
               version: 2.0.0
