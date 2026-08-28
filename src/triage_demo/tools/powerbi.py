@@ -113,6 +113,28 @@ class MockPowerBIClient:
 # ---------------------------------------------------------------------------
 
 
+def _require_ids(workspace_id: str, dataset_id: str) -> None:
+    """Fail loudly rather than calling Power BI with empty path segments.
+
+    An empty id produces `/groups//datasets//refreshes`, which returns 404.
+    A 404 is easy for a model to rationalise into a confident conclusion, so
+    the run reads as successful while resting on no evidence at all. That
+    happened: the agent correctly said "needs human" for entirely the wrong
+    reason.
+    """
+    missing = [
+        label
+        for label, value in (("workspace_id", workspace_id), ("dataset_id", dataset_id))
+        if not (value or "").strip()
+    ]
+    if missing:
+        raise ValueError(
+            "Cannot call Power BI without "
+            + " and ".join(missing)
+            + ". Set POWERBI_WORKSPACE_ID / POWERBI_DATASET_ID, or include the ids in the alert."
+        )
+
+
 class LivePowerBIClient:
     """Client-credentials flow against the Power BI REST API.
 
@@ -143,6 +165,36 @@ class LivePowerBIClient:
         if self._token and time.time() < self._token_expires_at - 60:
             return self._token
 
+        if not self._client_secret:
+            # Credential-free path. Power BI accepts an Entra agent identity as
+            # a workspace principal -- unlike Exchange, which rejects it -- so
+            # when this runs as a hosted Foundry agent it triggers refreshes as
+            # itself with no secret stored anywhere.
+            #
+            # Every human credential is excluded from the chain deliberately.
+            # DefaultAzureCredential would otherwise fall back to the
+            # developer's az login, and an unattended agent that can quietly
+            # act as a person is a worse failure than one that cannot start.
+            import asyncio
+
+            from azure.identity import DefaultAzureCredential
+
+            credential = DefaultAzureCredential(
+                exclude_cli_credential=True,
+                exclude_developer_cli_credential=True,
+                exclude_interactive_browser_credential=True,
+                exclude_shared_token_cache_credential=True,
+                exclude_visual_studio_code_credential=True,
+                managed_identity_client_id=self._client_id or None,
+            )
+            token = await asyncio.to_thread(credential.get_token, _SCOPE)
+            self._token = token.token
+            try:
+                self._token_expires_at = float(token.expires_on)
+            except (AttributeError, TypeError, ValueError):
+                self._token_expires_at = 0.0
+            return self._token
+
         url = f"https://login.microsoftonline.com/{self._tenant_id}/oauth2/v2.0/token"
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
@@ -162,6 +214,7 @@ class LivePowerBIClient:
         return self._token
 
     async def refresh_dataset(self, workspace_id: str, dataset_id: str) -> RefreshOutcome:
+        _require_ids(workspace_id, dataset_id)
         import httpx
 
         started = time.time()
@@ -231,6 +284,7 @@ class LivePowerBIClient:
     async def get_refresh_history(
         self, workspace_id: str, dataset_id: str, top: int = 5
     ) -> list[dict[str, Any]]:
+        _require_ids(workspace_id, dataset_id)
         import httpx
 
         token = await self._get_token()

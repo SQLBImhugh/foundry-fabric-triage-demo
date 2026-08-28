@@ -127,6 +127,20 @@ class TriageRunner:
 
     # --- inbox -------------------------------------------------------------
 
+    @staticmethod
+    def _resolve_id(*candidates: str) -> str:
+        """First non-empty id wins: scenario, then the alert, then configuration.
+
+        Without the configured fallback the live path called Power BI with
+        empty ids and got a 404, and the agent reached a plausible-looking
+        conclusion from a tool failure rather than from evidence. A wrong
+        answer that reads correctly is the worst kind.
+        """
+        for candidate in candidates:
+            if candidate and candidate.strip():
+                return candidate.strip()
+        return ""
+
     def _build_store(self) -> IncidentStore:
         """Choose where incidents live.
 
@@ -299,8 +313,16 @@ class TriageRunner:
             teams=teams,
             flag_table=self.flag_table,
             datasets=datasets or {},
-            workspace_id=(scenario.workspace_id if scenario else "") or "",
-            dataset_id=(scenario.dataset_id if scenario else "") or "",
+            workspace_id=self._resolve_id(
+                scenario.workspace_id if scenario else "",
+                request.workspace_id,
+                self.settings.powerbi_workspace_id,
+            ),
+            dataset_id=self._resolve_id(
+                scenario.dataset_id if scenario else "",
+                request.dataset_id,
+                self.settings.powerbi_dataset_id,
+            ),
             signature=signature,
             known_incident=known,
             approval_gate=self.build_approval_gate(scenario),

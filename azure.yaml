@@ -67,6 +67,17 @@ services:
               value: https://bitriagestore6343.table.core.windows.net/
             - name: INCIDENT_TABLE_NAME
               value: incidents
+            # Live Power BI. No client id or secret: Power BI accepts this
+            # agent identity as a workspace principal, so the controller
+            # triggers refreshes and reads refresh history as itself.
+            # (Exchange does not accept it -- see the GRAPH_* note above. The
+            # two services differ, and the demo says so rather than glossing it.)
+            - name: POWERBI_TENANT_ID
+              value: edf144d9-f468-4b8e-8443-f51dadfbc4f9
+            - name: POWERBI_WORKSPACE_ID
+              value: 1002e59c-cd3c-4364-97b7-0a890221eec4
+            - name: POWERBI_DATASET_ID
+              value: 4c6e3d18-5119-4622-9c11-83445ee78eb5
         protocols:
             - protocol: responses
               version: 2.0.0
