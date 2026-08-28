@@ -10,6 +10,13 @@ being able to explain any line of it out loud, over cleverness.
 
 It runs fully offline. Keep it that way.
 
+The controller is deployed as a Foundry **hosted agent** with its own Entra
+agent identity. This project was built with the **microsoft-foundry** skill —
+read that skill first before working on, or answering questions about, anything
+involving Foundry agents, routines, deployment or agent identity. The platform
+behaves differently from the documentation in several places this repo has
+already paid for once; `docs/hosted-architecture.md` records which.
+
 ## Commands
 
 ```powershell

@@ -127,6 +127,7 @@ tests/                 235 tests, all offline
 | Question | File |
 |---|---|
 | **Customer-facing walkthrough (annotated screenshots)** | [`walkthrough/WALKTHROUGH.html`](walkthrough/WALKTHROUGH.html) |
+| I'm an AI agent working on this repo — what are the rules? | [`AGENTS.md`](AGENTS.md) / [`.github/copilot-instructions.md`](.github/copilot-instructions.md) |
 | What's the build plan, and how far along is it? | [`docs/plan.md`](docs/plan.md) |
 | Which Foundry features are native vs. hand-rolled? | [`docs/foundry-native-architecture.md`](docs/foundry-native-architecture.md) |
 | How does it work and why is it built this way? | [`docs/architecture.md`](docs/architecture.md) |

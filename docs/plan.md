@@ -79,7 +79,7 @@ Everything runs with no tenant, no Azure login, no network.
 | Scripted / Azure OpenAI / Foundry providers | `src/triage_demo/providers/` |
 | Incident store with occurrence counting | `src/triage_demo/store/incidents.py` |
 | OTel GenAI spans with no-op fallback | `src/triage_demo/observability.py` |
-| 5 scenarios with machine-checked assertions | `scenarios/` |
+| 7 scenarios with machine-checked assertions | `scenarios/` |
 | CLI with live event rendering | `src/triage_demo/cli.py` |
 | 235 tests | `tests/` |
 
@@ -96,150 +96,164 @@ fixed and pinned by regression tests in `tests/test_hardening.py`. Summary in
 
 ---
 
-### Phase 2 — Tenant provisioning ⬜ NOT STARTED
+### Phase 2 — Tenant provisioning ✅ COMPLETE
 
-Mostly waiting on other people. Start it first; it has the longest lead time.
+| Item | Delivered |
+|---|---|
+| Foundry project | `bitriage-foundry-eus` / `bi-request-triage` (East US) |
+| Model deployment | `gpt-5.6-luna`, plus `gpt-5.4` as a measured fallback |
+| Monitored mailbox | A real user mailbox, scoped to this app alone |
+| App registration | `Mail.Read` (application), admin consented |
+| Power BI workspace | `BI Triage Demo`, on Fabric capacity |
+| Semantic model | Points at a SQL host that does not resolve, so refresh genuinely fails |
+| Storage account | Durable incident table |
+| Application Insights | Connected to the project |
 
-| Item | Detail | Blocker risk |
-|---|---|---|
-| Demo tenant + subscription | Microsoft demo tenant | Low |
-| AI Foundry project | Plus a model deployment | Low |
-| Monitored mailbox | Shared or licensed user | Low |
-| App registration | `Mail.Read` (application), admin consented | **Consent delay** |
-| Power BI workspace + semantic model | Bound to the mock table | Low |
-| **Power BI service principal access** | Tenant setting *"Allow service principals to use Power BI APIs"* + SP added to the workspace | **Highest risk item** |
-| Teams channel + incoming webhook | Or a Graph app registration | Low |
-| Data quality flag table | A table the demo can write to and show on screen | Low |
+**Correction to the original plan.** It stated that a managed identity cannot be
+added to a Power BI workspace, so a service principal was the only path. That is
+wrong, and it was verified wrong: a managed identity *can* be added, and so can
+an Entra **agent identity** — which is what the deployed controller actually
+uses, with no secret at all.
 
-**The one to start today**: the Power BI tenant setting. It is a tenant admin
-action, it is not obvious it is needed until a refresh returns 401, and it has
-blocked more demos than every other item on this list combined. A managed
-identity cannot be added to a Power BI workspace, so a service principal is the
-path.
+**The mailbox is the item that needed care, not Power BI.** App-only `Mail.Read`
+is tenant-wide by default. An Exchange `ApplicationAccessPolicy` confines it to
+one mailbox, and the controller refuses to start if it can read a mailbox it
+should not.
 
-Full steps: [`provisioning.md`](provisioning.md).
-
-**Exit criteria**: `triage-demo preflight` shows every live-mode row green.
-
-**Effort**: 0.5–1 day of work, 2–5 days of calendar time for approvals.
-
----
-
-### Phase 3 — Wire the live tools ⬜ NOT STARTED
-
-Swap the mocks for real services one at a time, verifying each independently.
-Interfaces already exist; this is configuration plus troubleshooting.
-
-1. **Inbox** — `GraphInbox` polling at 30s. Measure and record actual
-   inbox-to-first-action latency; they asked for the number.
-2. **Power BI** — `LivePowerBIClient`. The 202-Accepted refresh does not return
-   a body, so terminal state comes from polling refresh history. Verify against
-   a deliberately failing refresh, not only a passing one.
-3. **Teams** — `WebhookTeamsNotifier` posting an Adaptive Card.
-4. **Flag table** — repoint from CSV to the real table. Keep the CSV fallback:
-   showing the flag table before and after is a required demo beat, and a CSV
-   opened in Excel is easier to show than a Lakehouse query.
-
-Run `provider=mock, tools=live` first. Real side effects, deterministic
-reasoning — it isolates tool problems from model problems, which otherwise
-present identically.
-
-**Exit criteria**: both scenarios pass end to end with `TRIAGE_TOOL_MODE=live`.
-
-**Effort**: 0.5 day if Phase 2 landed clean; 1–2 days if Power BI SP access needs
-escalation.
+**Exit criteria (met)**: `triage-demo preflight` green; `triage-demo identity
+--check-scope` shows the mailbox boundary enforced.
 
 ---
 
-### Phase 4 — Foundry agents ⬜ NOT STARTED
+### Phase 3 — Wire the live tools ✅ COMPLETE (Teams and flag table deliberately still mock)
 
-```powershell
-python scripts\register_foundry_agents.py --handoff client --dry-run
-python scripts\register_foundry_agents.py --handoff client
-```
+1. **Inbox** — `GraphInbox`, live. Gained a **relevance filter** that was not in
+   the original plan and turned out to be a security control rather than
+   housekeeping: an agent that acts on every message is steerable by anyone who
+   can email it. Unfiltered against a real mailbox it triaged security digests
+   and crashed on several.
+2. **Power BI** — `LivePowerBIClient`, live, against a model whose refresh
+   genuinely fails. The plan's instinct to verify against a *failing* refresh
+   rather than a passing one was the right one: the failure is
+   `ModelRefreshFailed_CredentialsNotSpecified`, which is unrecoverable by
+   retry, and the agent correctly declines to retry and escalates instead.
+3. **Teams** — still the mock notifier. Office 365 connector webhooks were
+   retired on 22 May 2026; the replacement is a Power Automate Workflows
+   webhook, and there is no app-only path for posting to a channel.
+4. **Flag table** — still CSV, deliberately. A CSV opened in Excel is easier to
+   show on screen than a Lakehouse query, and the before/after is a required
+   demo beat.
 
-Register **both** handoff shapes and show both:
+**Exit criteria (met)**: scenarios pass with `TRIAGE_TOOL_MODE=live`, and the
+deployed controller reads real refresh history from the real dataset.
 
-- `--handoff client` — the Triage agent calls `consult_data_quality_agent` as a
-  function tool; this process performs the handoff and can refuse it.
-- `--handoff connected` — the DQ agent is attached as a connected agent and
-  Foundry performs the handoff server-side.
+---
 
-**Connected mode is show-only until the DQ tools are server-callable.** Foundry
-executes a connected agent server-side, so its tools must be reachable by
-Foundry; `check_duplicates` is a local scan in the calling process. Exposing it
-via OpenAPI or an Azure Function is the prerequisite, and is not in scope for
-this demo. Register it, show the shape and the trace, and say plainly that the
-running configuration is client orchestration.
+### Phase 4 — Foundry agents ✅ COMPLETE (design changed)
 
-Connected agents demo better. Client orchestration is what you ship, because the
-ledger has to sit between the two agents to mean anything. Showing both, and
-being explicit about the tradeoff, is a stronger answer than picking one.
+The original two-handoff plan did not survive contact with the platform.
 
-**Known trap**: a Foundry-registered agent does not pick up local prompt or tool
-changes. Re-register or the demo silently runs the previous definition. This has
-bitten the production platform more than once. Put it on the pre-demo checklist.
+- **Connected agents are now "(classic)"** and cannot call local functions.
+- **`a2a_preview` cannot call a prompt agent.** It fetches an agent card first;
+  a prompt agent publishes none, and the call fails at card fetch with a
+  misleading 401. The callee must be a *hosted* agent speaking `a2a`.
 
-**Exit criteria**: both scenarios pass with `TRIAGE_PROVIDER_MODE=foundry`, in
-both handoff modes; the handoff is visible in the Foundry trace.
+So the shipped design is the `responses` handoff: the orchestrator invokes the
+DQ agent over `/openai/v1/responses`, which keeps the policy ledger between the
+two agents. That was always the shape worth shipping — the ledger has to sit in
+the middle to mean anything — but it is now the only one that works, rather than
+one of two options.
+
+**Known trap, still true**: a Foundry-registered agent does not pick up local
+prompt or tool changes. Re-register or the demo silently runs the previous
+definition. It is on the pre-demo checklist.
+
+**Exit criteria (met)**: 7/7 scenarios pass with `TRIAGE_PROVIDER_MODE=foundry`.
+
+---
+
+### Phase 5 — Observability ✅ COMPLETE
+
+`APPLICATIONINSIGHTS_CONNECTION_STRING` is set and spans arrive. One thing the
+plan did not anticipate: the hosted container needs
+**`Monitoring Metrics Publisher`** on the App Insights resource, or the log
+floods with a 403 every second and drowns everything useful.
+
+Spans remain metadata only — no prompt or completion content.
+
+**Exit criteria (met)**: live spans queryable; a deliberately failed run is
+demonstrable, and `requires_investigation` is set on it.
+
+---
+
+### Phase 6 — Hosted deployment and agent identity ✅ COMPLETE
+
+**Not in the original plan at all.** It turns the demo from a laptop script into
+something that could actually be operated, and it became the strongest part of
+the story.
+
+| Deliverable | Where |
+|---|---|
+| Controller as a Foundry hosted agent | `src/app.py`, `azure.yaml` |
+| Scheduled trigger | Foundry routine, `bi-triage-schedule` |
+| Durable incident store | `src/triage_demo/store/azure_table.py` |
+| Inbox relevance filter | `src/triage_demo/tools/mail_filter.py` |
+| Agent identity inspection | `src/triage_demo/identity.py`, `triage-demo identity` |
+| Model chosen by measurement | `scripts/compare_models.py`, `docs/model-selection.md` |
+
+What the tenant actually does, verified rather than assumed:
+
+- Foundry **creates an Entra agent identity per agent, automatically**, with a
+  blueprint holding **zero keys and zero passwords** and a federated credential
+  instead. There is no secret to rotate because there is no secret.
+- Entra records a **sponsor** — the accountable human — at creation.
+- **Exchange rejects agent identities** for app-only mailbox access (401), while
+  Graph's directory endpoint accepts the same token (200) and Power BI accepts
+  the identity as a workspace principal. So one conventional app registration
+  remains, for mail only, and it is the only credential in the deployment.
+- The container federates a **workload identity**, not an IMDS managed identity.
+
+Full detail, including the things that only surfaced by trying them:
+[`hosted-architecture.md`](hosted-architecture.md).
+
+**Exit criteria (met)**: an incident written by the container in Azure is
+readable from another machine, which proves it authenticated as itself.
+
+---
+
+### Phase 7 — Rehearsal 🟡 PARTIAL
+
+Done:
+
+- [x] All 7 scenarios pass live, and offline
+- [x] Suppression, refusal, and both approval directions rehearsed
+- [x] Reset procedure verified, including the durable table
+- [x] Customer walkthrough captured — `walkthrough/WALKTHROUGH.html`
+- [x] Offline fallback verified: two env vars and the demo keeps running
+- [x] Model fallback registered and passing, needing no provisioning
+
+Outstanding:
+
+- [ ] Two consecutive clean full rehearsals on the presenting machine and network
+- [ ] Inbox-to-first-action latency measured and written down — they asked for
+      the number and it is not yet recorded
+- [ ] A genuine Power BI alert email delivered to the monitored mailbox, to
+      exercise ingestion end to end rather than by invocation
 
 **Effort**: 0.5 day.
 
 ---
 
-### Phase 5 — Observability ⬜ NOT STARTED
-
-`gen_ai_span()` already emits OTel GenAI spans. Remaining work is Azure-side.
-
-1. Set `APPLICATIONINSIGHTS_CONNECTION_STRING`; confirm spans arrive.
-2. Build one workbook: per-agent latency, tokens by model, tool-call frequency.
-3. Rehearse the **failed-run** view. They asked specifically how a failed run
-   surfaces, and a green dashboard does not answer that question. Run
-   `scenario3-policy-block` and show the resulting incident with
-   `requires_investigation` set.
-
-Spans are metadata only — no prompt or completion content. State this explicitly.
-In a multi-tenant system, content recording ingests customer data into a
-telemetry store with different access controls than the source system.
-
-**Exit criteria**: a live run's spans are queryable within ~5 minutes, and a
-deliberately failed run is demonstrable in App Insights.
-
-**Effort**: 0.5 day.
-
----
-
-### Phase 6 — Rehearsal ⬜ NOT STARTED
-
-Full dry run against the live tenant, twice, on the machine and network you will
-present from.
-
-- [ ] Both scenarios end to end, live
-- [ ] Scenario 2b (suppression) — needs an open incident, so ordering matters
-- [ ] Scenario 3 (refusal) — the most important beat
-- [ ] Full run-sheet order back to back with `--keep-incidents` from scenario 3 on
-- [ ] Reset procedure verified: `triage-demo reset` between rehearsals
-- [ ] Inbox-to-first-action latency measured and written down
-- [ ] Re-register Foundry agents; confirm version numbers moved
-- [ ] Screenshot fallbacks captured for every beat
-
-**Have a fallback.** The demo runs offline with `TRIAGE_PROVIDER_MODE=mock` and
-`TRIAGE_TOOL_MODE=mock`. If the tenant misbehaves mid-session, switch two env
-vars and keep going rather than debugging in front of the customer.
-
-**Exit criteria**: two consecutive clean full rehearsals.
-
-**Effort**: 0.5 day.
-
----
-
-### Phase 7 — Demo day ⬜ NOT STARTED
+### Phase 8 — Demo day ⬜ NOT STARTED
 
 Run sheet: [`run-sheet.md`](run-sheet.md). Question prep: [`faq.md`](faq.md).
 
+Open with `triage-demo identity --check-scope` if anyone from security or
+identity is in the room; it reframes everything that follows.
+
 ---
 
-### Phase 8 — Post-demo handoff ⬜ NOT STARTED
+### Phase 9 — Post-demo handoff ⬜ NOT STARTED
 
 They asked for the assets afterward. Share this repo plus:
 
@@ -247,6 +261,7 @@ They asked for the assets afterward. Share this repo plus:
 - prompts — `src/triage_demo/agents/prompts/`
 - tool schemas — `triage-demo tools`
 - connection config — `.env.example` (never a filled-in `.env`)
+- the architecture write-up — [`hosted-architecture.md`](hosted-architecture.md)
 - the honest effort estimate below
 
 ---
@@ -257,18 +272,26 @@ They asked directly, so answer directly.
 
 ### This demo
 
-| Phase | Engineering | Calendar |
+| Phase | Engineering | Status |
 |---|---|---|
 | 1. Offline skeleton | ~1 day | done |
-| 2. Tenant provisioning | 0.5–1 day | 2–5 days (approvals) |
-| 3. Live tools | 0.5–2 days | — |
-| 4. Foundry agents | 0.5 day | — |
-| 5. Observability | 0.5 day | — |
-| 6. Rehearsal | 0.5 day | — |
-| **Total** | **3.5–5 engineer-days** | **1.5–2 weeks elapsed** |
+| 2. Tenant provisioning | ~0.5 day | done |
+| 3. Live tools | ~1 day | done |
+| 4. Foundry agents | ~0.5 day | done |
+| 5. Observability | ~0.5 day | done |
+| 6. Hosted deployment + agent identity | ~1.5 days | done |
+| 7. Rehearsal | 0.5 day | outstanding |
+| **Total** | **~5.5 engineer-days** | |
 
 The plumbing dominates. The agents are the small part — which is itself worth
 saying, because it is the opposite of what most people expect.
+
+Phase 6 was not in the original estimate and came in around 1.5 days. Most of
+that was not writing code: it was establishing which Microsoft services accept
+an Entra agent identity and which do not, by trying them. That is the cost
+nobody budgets for, and it is the reason
+[`hosted-architecture.md`](hosted-architecture.md) exists — so the next project
+pays it once rather than again.
 
 ### Production-grade equivalent
 
@@ -367,3 +390,10 @@ demo. They belong in the production table above, not in Phase 1.
 | Validate outcome against evidence | An agent reported "Fixed" three times while the job kept failing |
 | Generic customer persona in the repo | Reusable for the next engagement; no customer name in a shared asset |
 | Python | Near-direct port of the production platform's components rather than a rewrite |
+| Controller hosted in Foundry, not a Container App | Most Foundry-native option, and it gets an Entra agent identity for free. Also unblocked the routine trigger |
+| One code path for scheduled and interactive runs | A demo path that differs from the production path eventually demonstrates something that does not exist |
+| Incidents in Azure Tables, not a file | A container's filesystem goes away on recycle. Incident state is what stops the agent remediating the same failure twice after a restart |
+| Agent identity everywhere it works; one app registration for mail | Verified: Graph directory and Power BI accept an agent identity, Exchange does not. Showing the one remaining secret is a stronger argument than hiding it |
+| Inbox relevance filter, failing closed | An agent that acts on every message is steerable by anyone who can email it. Unfiltered it triaged security digests and crashed |
+| Model chosen by running all seven scenarios | Both passed; the chosen one was faster and needed one fewer controller correction. A preference backed by a number survives a challenge |
+| Both model pairs left registered | The fallback needs no provisioning under time pressure |
