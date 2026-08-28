@@ -3,7 +3,7 @@
 **Status**: Deployed, rehearsed and ready. Running unattended in Azure. The controller runs as a
 Foundry hosted agent with its own Entra agent identity, woken by a Foundry
 routine, reading a real mailbox and acting on a real Power BI dataset.
-248 tests green and still fully offline; the mock path remains the rehearsal
+287 tests green and still fully offline; the mock path remains the rehearsal
 fallback. See `docs/hosted-architecture.md` for what each identity can actually
 reach — including the things that only surfaced by trying them.
 
@@ -81,7 +81,7 @@ Everything runs with no tenant, no Azure login, no network.
 | OTel GenAI spans with no-op fallback | `src/triage_demo/observability.py` |
 | 7 scenarios with machine-checked assertions | `scenarios/` |
 | CLI with live event rendering | `src/triage_demo/cli.py` |
-| 248 tests | `tests/` |
+| 287 tests | `tests/` |
 
 **Exit criteria (met)**: all five scenarios pass their assertions offline;
 `ruff check` clean; every scenario produces the same outcome, the same tool
@@ -278,6 +278,19 @@ wired. Do not imply it is.
 ```powershell
 python scripts\build_handoff.py
 ```
+
+**Two walkthroughs ship, not one.** `WALKTHROUGH.html` explains the architecture;
+`PERSONAS.html` tells the same runs through the analyst who reads the report and
+the engineer who gets paged. The second is the one to open first if the room is
+more business than technical, and the one to send to people who were not there.
+
+**Not done: persona accounts in the tenant.** The persona document uses named
+roles rather than real users. Creating users and assigning licences needs
+Microsoft Graph write access, which was blocked throughout by a
+continuous-access-evaluation challenge (`InteractionRequired`,
+`TokenCreatedWithOutdatedPolicies`) that only an interactive `az login` clears.
+The document is built so it does not need them — every screenshot in it is a real
+captured run — but real accounts would be the prerequisite for avatars in Teams.
 
 Generates rather than curates, so the bundle cannot drift from the code, and
 refuses to ship if it finds a credential. Contents and the framing to use when

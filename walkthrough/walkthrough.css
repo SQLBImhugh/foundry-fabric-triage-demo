@@ -360,3 +360,68 @@ footer { border-top: 1px solid var(--border-soft); margin-top: 70px; padding-top
   line-height: 1.65;
 }
 .note b { color: var(--text); }
+
+/* --- persona walkthrough additions ------------------------------------- */
+
+/* Small label above the title, for context without competing with it. */
+.eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 14px;
+}
+
+/* Section jump list. Horizontal so it reads as navigation, not content. */
+.toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 44px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.toc a {
+  font-size: 13px;
+  color: var(--text-dim);
+  text-decoration: none;
+  padding: 6px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+}
+.toc a:hover { color: var(--text); border-color: var(--accent-dim); }
+
+/* Comparison tables. Used for who-sees-what and before/after. */
+table.matrix {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 26px 0 8px;
+  font-size: 15px;
+}
+table.matrix th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 14px 10px 0;
+}
+table.matrix td {
+  vertical-align: top;
+  padding: 13px 14px 13px 0;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--text);
+  line-height: 1.6;
+}
+table.matrix td:first-child { white-space: nowrap; padding-right: 26px; }
+table.matrix code { font-size: 13px; color: var(--text-dim); }
+
+.muted { color: var(--text-faint); font-size: 13px; }
+
+footer {
+  margin-top: 72px;
+  padding-top: 26px;
+  border-top: 1px solid var(--border-soft);
+  color: var(--text-faint);
+  font-size: 14px;
+}
+footer a { color: var(--text-dim); }

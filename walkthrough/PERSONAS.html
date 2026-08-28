@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A Monday morning, from three points of view</title>
+<link rel="stylesheet" href="walkthrough.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <span class="brand">BI Request Triage <span>&middot;</span> Foundry</span>
+  <a href="WALKTHROUGH.html">Technical walkthrough</a>
+</nav>
+
+<div class="wrap">
+
+<header class="hero">
+  <div class="eyebrow">BI Request Triage &amp; Resolution &middot; Azure AI Foundry</div>
+  <h1>A refresh fails at 06:02.<br>Nobody finds out the hard way.</h1>
+  <p class="sub">
+    The companion document to the technical walkthrough. Same system, same runs, told from the
+    point of view of the people it affects rather than the components it is built from.
+  </p>
+</header>
+
+<nav class="toc">
+  <a href="#cast">The cast</a>
+  <a href="#timeline">The morning</a>
+  <a href="#resolved">1 &middot; Resolved before anyone looks</a>
+  <a href="#escalated">2 &middot; When it needs a human</a>
+  <a href="#declined">3 &middot; When the human says no</a>
+  <a href="#accountable">Who is accountable</a>
+  <a href="#difference">What actually changed</a>
+</nav>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section id="cast">
+  <h2><span class="num">A</span> The cast</h2>
+  <p class="lede">
+    Three parties. Two of them are people, and the demo is really about how little of their time
+    this costs.
+  </p>
+
+  <table class="matrix">
+    <thead><tr><th>Who</th><th>What they care about</th><th>What they see today</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>Priya</b><br><span class="muted">Finance analyst</span></td>
+        <td>That the number in front of her is today's number.</td>
+        <td>A report that looks fine and is quietly a day stale — the worst failure mode, because
+        nothing is obviously broken.</td>
+      </tr>
+      <tr>
+        <td><b>Sam</b><br><span class="muted">BI platform engineer, on call</span></td>
+        <td>Not being paged for things that fix themselves, and being paged for things that
+        don't.</td>
+        <td>An alert mailbox nobody reads, and a Monday spent reconstructing what happened at
+        06:02.</td>
+      </tr>
+      <tr>
+        <td><b>The agent</b><br><span class="muted">bi-triage-controller</span></td>
+        <td>Following the rules it was given.</td>
+        <td>Everything: the alert, the refresh history, the data, the incident record.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p class="note">
+    <b>On the names.</b> Priya and Sam are roles, not accounts in the tenant. Everything shown below
+    is a real captured run against real services — the reasoning, the Power BI calls, the incident
+    records and the identities are all live. Only the two human names are stand-ins, so the document
+    can be reused without putting a customer's staff in it.
+  </p>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section id="timeline">
+  <h2><span class="num">B</span> The morning, minute by minute</h2>
+  <p class="lede">
+    The whole point is the gap between the second and third rows. Today that gap is measured in
+    hours and usually starts with someone noticing a number looks wrong.
+  </p>
+
+  <table class="matrix">
+    <thead><tr><th>Time</th><th>What happens</th><th>Who is involved</th></tr></thead>
+    <tbody>
+      <tr><td><code>06:02</code></td><td>Scheduled refresh fails. Gateway timeout.</td><td class="muted">nobody</td></tr>
+      <tr><td><code>06:03</code></td><td>Power BI emails the alerts mailbox.</td><td class="muted">nobody</td></tr>
+      <tr><td><code>06:05</code></td><td>A Foundry routine wakes the agent on schedule.</td><td class="muted">the agent</td></tr>
+      <tr><td><code>06:05</code></td><td>It checks whether this failure is already known, reads the refresh
+        history, and asks the data quality agent whether the underlying data is sound.</td><td class="muted">the agent</td></tr>
+      <tr><td><code>06:06</code></td><td>One retry, verified. Or: escalation, with the evidence attached.</td><td class="muted">the agent</td></tr>
+      <tr><td><code>08:30</code></td><td>Priya opens the report. It is current. She never learns any of this
+        happened.</td><td><b>Priya</b></td></tr>
+      <tr><td><code>08:30</code></td><td>Sam reads one notification that says what broke, what was done and
+        why — or a request for a decision, if the agent was not allowed to act alone.</td><td><b>Sam</b></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section id="resolved">
+  <h2><span class="num">1</span> The common case: resolved before anyone looks</h2>
+  <p class="lede">
+    A transient gateway timeout. The failure is isolated, the data is sound, and one retry is the
+    correct answer. This is the majority of real alerts, and it is the case that wastes the most
+    human time today.
+  </p>
+
+  <div class="figure">
+    <div class="cap-top"><span class="where">live run &middot; gpt-5.6-luna</span> what the agent did at 06:05</div>
+    <div class="shot"><img src="shots/run-1-transient.svg" alt="The agent triaging a transient refresh failure"></div>
+    <ul class="callouts">
+      <li><span class="n c1">1</span><span class="txt">
+        <b>It checks whether this is already known before doing anything else.</b> If Sam is already
+        working this problem, a second alert must not trigger a second fix. That check runs before
+        any remediation is contemplated.
+      </span></li>
+      <li><span class="n c2">2</span><span class="txt">
+        <b>It asks whether the data is the problem.</b> Refreshing a report never fixes bad data, so
+        that question is settled first — by a second agent that reads the actual rows, not by a
+        guess.
+      </span></li>
+      <li><span class="n c3">3</span><span class="txt">
+        <b>"Isolated, therefore safe to retry" is a conclusion from evidence.</b> Two prior refreshes
+        completed; one failed. That is read from Power BI, not inferred from the wording of the
+        alert.
+      </span></li>
+      <li><span class="n c4">4</span><span class="txt">
+        <b>One retry. Verified.</b> Not "triggered and hoped" — the agent confirms the refresh
+        actually completed before it reports success.
+      </span></li>
+    </ul>
+  </div>
+
+  <p><b>Priya's morning:</b> unchanged. That is the entire outcome, and it is the point.</p>
+  <p><b>Sam's morning:</b> one notification, already resolved, with the evidence attached.</p>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section id="escalated">
+  <h2><span class="num">2</span> When it needs a human, it asks — with the evidence</h2>
+  <p class="lede">
+    Some failures cannot be fixed by retrying, and some fixes are too consequential to make
+    unattended. The agent is not allowed to decide which of those it is.
+  </p>
+
+  <div class="figure">
+    <div class="cap-top"><span class="where">deployed container &middot; East US</span> a failure that retrying cannot fix</div>
+    <div class="shot"><img src="shots/shot-hosted-invoke.svg" alt="The agent declining to retry and escalating"></div>
+    <ul class="callouts">
+      <li><span class="n c1">1</span><span class="txt">
+        <b>It declined to retry, and said why.</b> The data source credentials need updating;
+        refreshing again cannot repair that. Retrying would have burned the single permitted
+        remediation on an action that could not work.
+      </span></li>
+      <li><span class="n c2">2</span><span class="txt">
+        <b>Knowing when not to act is the harder half.</b> An agent that always does something is
+        easy to build and impossible to trust.
+      </span></li>
+      <li><span class="n c3">3</span><span class="txt">
+        <b>Sam gets a decision to make, not a mystery to investigate.</b> Report, error, what was
+        checked, what was ruled out, and what needs a person.
+      </span></li>
+    </ul>
+  </div>
+
+  <div class="figure">
+    <div class="cap-top"><span class="where">rendered from the live payload</span> what lands in Sam's channel</div>
+    <div class="shot"><img src="shots/shot-teams-card.svg" alt="The notification card the agent posts"></div>
+    <ul class="callouts">
+      <li><span class="n c1">1</span><span class="txt">
+        <b>Everything needed to agree or disagree, in one card.</b> Sam does not have to open a
+        console to form a view.
+      </span></li>
+      <li><span class="n c2">2</span><span class="txt">
+        <b>Secrets are stripped before this leaves the process.</b> A connection string in an error
+        message never reaches a channel with a wider audience than the system it came from.
+      </span></li>
+    </ul>
+  </div>
+
+  <p class="note">
+    <b>Being straight about this one.</b> The card above is generated from the payload the agent
+    really produces, but delivery to a channel is not wired in this build — Microsoft retired the old
+    Teams webhook connectors on 22 May 2026 and the replacement has to be created by hand. It is a
+    two-minute step, documented in the run sheet. Nothing else on this page is pending.
+  </p>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section id="declined">
+  <h2><span class="num">3</span> When Sam says no, that is the end of it</h2>
+  <p class="lede">
+    Some actions require a human to agree first. The interesting half of an approval is what happens
+    when the answer is no — that is where an agent either respects the boundary or works around it.
+  </p>
+
+  <div class="figure">
+    <div class="cap-top"><span class="where">live run</span> a proposed fix, declined</div>
+    <div class="shot"><img src="shots/run-7-denied.svg" alt="A human declining a proposed remediation"></div>
+    <ul class="callouts">
+      <li><span class="n c1">1</span><span class="txt">
+        <b>The action was never dispatched.</b> Not attempted and rolled back — never sent. There is
+        no path from a declined proposal to a change in your tenant.
+      </span></li>
+      <li><span class="n c2">2</span><span class="txt">
+        <b>It did not try something else instead.</b> A denial is not a puzzle to route around.
+      </span></li>
+      <li><span class="n c3">3</span><span class="txt">
+        <b>The decision is recorded with the incident.</b> Who was asked, what they said, and when —
+        so "why was nothing done?" has an answer six weeks later.
+      </span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section id="accountable">
+  <h2><span class="num">4</span> "Whose agent is this?"</h2>
+  <p class="lede">
+    The question every security review asks, and the one most agent demos cannot answer. It is worth
+    knowing what the agent <em>is</em> before deciding what it may do.
+  </p>
+
+  <div class="figure">
+    <div class="cap-top"><span class="where">live directory read</span> triage-demo identity --check-scope</div>
+    <div class="shot"><img src="shots/shot-identity.svg" alt="The agents' identities read from Microsoft Entra"></div>
+    <ul class="callouts">
+      <li><span class="n c1">1</span><span class="txt">
+        <b>Each agent is its own identity in your directory</b>, not a shared service account. What
+        it did is attributable to it.
+      </span></li>
+      <li><span class="n c2">2</span><span class="txt">
+        <b>A named person is accountable.</b> Entra records a sponsor. When something goes wrong at
+        3am the directory can answer "who owns this?".
+      </span></li>
+      <li><span class="n c3">3</span><span class="txt">
+        <b>There is no password to leak.</b> No key, no secret, nothing to rotate — it authenticates
+        with a federated credential. That is a different property from "the secret is stored
+        carefully".
+      </span></li>
+      <li><span class="n c4">4</span><span class="txt">
+        <b>The agents that think hold nothing at all.</b> Only the one that acts has permissions, and
+        it can read exactly one mailbox — a boundary the system tests on itself at startup and
+        refuses to run without.
+      </span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section id="difference">
+  <h2><span class="num">5</span> What actually changed</h2>
+
+  <table class="matrix">
+    <thead><tr><th></th><th>Today</th><th>With this running</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>Priya</b></td>
+        <td>Opens a stale report and cannot tell. Or spots it, and loses a morning chasing whether
+        the number is real.</td>
+        <td>Opens a current report. Learns nothing about any of it.</td>
+      </tr>
+      <tr>
+        <td><b>Sam</b></td>
+        <td>An alert mailbox nobody reads. Reconstructs 06:02 from logs, hours later.</td>
+        <td>One notification per genuine incident, with the evidence and the reasoning attached, and
+        a decision to make only when a decision is actually needed.</td>
+      </tr>
+      <tr>
+        <td><b>Whoever asks later</b></td>
+        <td>"I think it was the gateway?"</td>
+        <td>Every terminal outcome recorded — including the refusals, the crashes and the declined
+        approvals.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p class="note">
+    <b>The claim being made is narrow, deliberately.</b> This does not fix your data platform. It
+    removes the gap between something breaking and somebody competent looking at it, and it makes
+    the routine cases stop consuming attention — while refusing, loudly and in writing, to make the
+    consequential ones on its own.
+  </p>
+</section>
+
+<footer>
+  <p>Companion to <a href="WALKTHROUGH.html">the technical walkthrough</a>, which covers the same
+  runs from the architecture's point of view.</p>
+</footer>
+
+</div>
+
+</body>
+</html>

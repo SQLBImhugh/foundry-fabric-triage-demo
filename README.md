@@ -118,7 +118,7 @@ scenarios/*.yaml       Seven runnable scenarios with assertions
 mock/                  Seeded data + four inbox messages
 scripts/               Foundry agent registration
 docs/                  Plan, architecture, run sheet, FAQ, provisioning
-tests/                 248 tests, all offline
+tests/                 287 tests, all offline
                        test_hardening.py pins the post-review fixes
 ```
 
@@ -127,6 +127,7 @@ tests/                 248 tests, all offline
 | Question | File |
 |---|---|
 | **Customer-facing walkthrough (annotated screenshots)** | [`walkthrough/WALKTHROUGH.html`](walkthrough/WALKTHROUGH.html) |
+| **The same runs, told from the user's point of view** | [`walkthrough/PERSONAS.html`](walkthrough/PERSONAS.html) |
 | I'm an AI agent working on this repo — what are the rules? | [`AGENTS.md`](AGENTS.md) / [`.github/copilot-instructions.md`](.github/copilot-instructions.md) |
 | What's the build plan, and how far along is it? | [`docs/plan.md`](docs/plan.md) |
 | Which Foundry features are native vs. hand-rolled? | [`docs/foundry-native-architecture.md`](docs/foundry-native-architecture.md) |
@@ -136,6 +137,7 @@ tests/                 248 tests, all offline
 | What has to exist in the tenant first? | [`docs/provisioning.md`](docs/provisioning.md) |
 | What runs where in Azure, and which identity does it? | [`docs/hosted-architecture.md`](docs/hosted-architecture.md) |
 | Why this model, and what happens if it's unavailable? | [`docs/model-selection.md`](docs/model-selection.md) |
+| What do I give them afterwards, and what must not go in it? | [`docs/handoff.md`](docs/handoff.md) |
 
 Open the walkthrough locally:
 
@@ -170,7 +172,7 @@ python scripts\register_foundry_agents.py --dry-run
 ## Tests
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 248 tests, no network
+.\.venv\Scripts\python.exe -m pytest -q      # 287 tests, no network
 .\.venv\Scripts\python.exe -m ruff check .
 ```
 
