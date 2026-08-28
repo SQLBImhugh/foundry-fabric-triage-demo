@@ -262,3 +262,93 @@ identically and you lose twenty minutes.
 - Traces carry metadata only — no prompt or completion content.
 - The Teams webhook URL is a bearer credential in URL form. Rotate it after the
   demo if the recording is shared.
+
+---
+
+## 9. Hosted deployment (the production shape)
+
+Everything above describes the components. This section is how they run
+unattended in Azure rather than from a laptop.
+
+### What gets created
+
+| Resource | Purpose |
+|---|---|
+| Foundry hosted agent `bi-triage-controller` | The orchestration loop, as a container |
+| Foundry routine `bi-triage-schedule` | Wakes it on a cron schedule |
+| Storage account + `incidents` table | Durable incident state across restarts |
+| Application Insights | Traces from the container |
+
+### Deploy
+
+```powershell
+azd config set auth.useAzCliAuth true          # reuse the az login; no browser flow
+azd env new bitriage
+azd env set AZURE_SUBSCRIPTION_ID       (az account show --query id -o tsv)
+azd env set AZURE_LOCATION              eastus
+azd env set AZURE_AI_PROJECT_ENDPOINT   "<project endpoint>"
+azd env set AZURE_AI_PROJECT_ID         "<project ARM id>"
+
+# Mailbox ingestion credentials. Never committed; .azure/ is gitignored.
+azd env set GRAPH_CLIENT_ID     "<ingestion app id>"
+azd env set GRAPH_CLIENT_SECRET "<ingestion secret>"
+
+azd deploy bi-triage-controller --no-prompt
+azd deploy bi-triage-schedule   --no-prompt
+```
+
+### Grant the controller identity what it needs
+
+Deploying creates a **new** Entra agent identity for the controller, with no
+permissions. Each agent gets its own identity, so each needs its own grants —
+that is least privilege working, not a misconfiguration. Find it with:
+
+```powershell
+.\.venv\Scripts\triage-demo.exe identity --check-scope
+```
+
+| Scope | Role | Why |
+|---|---|---|
+| Storage account | `Storage Table Data Contributor` | Persist incidents |
+| Application Insights | `Monitoring Metrics Publisher` | Emit traces; without it the log floods with 403s |
+| Power BI workspace | Admin, principal type `App` | Read refresh history, trigger a retry |
+
+**Do not grant it `Mail.Read`.** Exchange rejects Entra agent identities for
+app-only mailbox access — verified as a 401 against the same token Graph's
+directory endpoint accepted with a 200. Mail goes through the app registration
+from section 2, which is why that one secret still exists.
+
+### Verify
+
+```powershell
+azd ai agent invoke bi-triage-controller "sweep"      # reads the mailbox
+azd ai agent monitor bi-triage-controller             # shows what it ignored, and why
+.\.venv\Scripts\triage-demo.exe incidents             # written by the container, read from here
+```
+
+The last one is the real proof: an incident written by the container in Azure,
+read back on another machine, means the container authenticated to storage as
+itself with no secret in the deployment.
+
+### Governance notes
+
+Both encountered rather than anticipated, and both worth expecting again:
+
+- The storage account is created with **shared key access already disabled**.
+  Do not try to re-enable it; the identity-based path is the supported one.
+- **Public network access is disabled within minutes** by tenant policy. Resolve
+  with the supported `SecurityControl=Ignore` exemption tag plus a written
+  justification, not by fighting the control:
+
+```powershell
+az storage account update -n <account> -g <rg> `
+  --set tags.SecurityControl=Ignore tags.Justification="<why>"
+az storage account update -n <account> -g <rg> --public-network-access Enabled
+```
+
+### Restarting the container
+
+`azd deploy` with no code change completes in seconds and does **not** restart
+the container, so its in-memory incident cache survives. To force a genuine
+restart, change something in the service definition (an environment variable is
+enough) and redeploy.

@@ -54,8 +54,9 @@ Four panels, read left to right:
   no secret to rotate because there is no secret.
 - `sponsor: Mark Hughes` — Entra records the human accountable for the agent.
   Nobody typed that in; Foundry set it at creation.
-- The two **reasoning** agents show `permissions: none`. They think; they
-  cannot act. Only the controller holds anything.
+- The two **reasoning** agents show `Graph permissions: none` and no Azure
+  roles at all. They think; they cannot act. The controller holds exactly two
+  Azure roles — write an incident, emit a trace — and no Graph permissions.
 - The fourth panel is a conventional **app registration**, shown deliberately:
   `passwords=1` and an expiry date, `sponsor: none recorded`.
 

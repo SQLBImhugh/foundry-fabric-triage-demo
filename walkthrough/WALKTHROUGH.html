@@ -331,9 +331,10 @@
       </span></li>
       <li><span class="n c3">3</span><span class="txt">
         <b>The agents that think hold nothing.</b> Both reasoning agents show
-        <code>permissions: none</code>. They read evidence and return a verdict; they cannot act.
-        Only the controller holds permissions, and it is the component whose every action is
-        checked against policy. A component that cannot act cannot be talked into acting.
+        <code>Graph permissions: none</code> and no Azure roles. They read evidence and return a
+        verdict; they cannot act. The controller holds exactly two Azure roles — write incidents,
+        emit traces — and no Graph permissions at all. A component that cannot act cannot be talked
+        into acting.
       </span></li>
       <li><span class="n c4">4</span><span class="txt">
         <b>The mailbox is a boundary, and it is tested.</b> App-only mail permission is tenant-wide

@@ -90,6 +90,7 @@ class AgentIdentityReport:
     federated_credentials: list[str] = field(default_factory=list)
     sponsors: list[str] = field(default_factory=list)
     graph_app_roles: list[str] = field(default_factory=list)
+    azure_roles: list[str] = field(default_factory=list)
     scope_proof: MailboxScopeProof | None = None
     #: Only set for a conventional app registration; agent identities have none.
     secret_expires_at: str = ""
@@ -204,6 +205,49 @@ def load_app_registration(
     if scope_proof is not None and report.holds_mail_permission:
         report.scope_proof = scope_proof
     return report
+
+
+def load_azure_roles(principal_id: str, *, subscription_id: str = "") -> list[str]:
+    """List Azure RBAC roles held by a principal, resolved to readable names.
+
+    Separate from Graph app roles on purpose. The controller holds no Graph
+    permissions at all but does hold Azure roles, and a panel that reported
+    only the former would say "permissions: none" about the one component that
+    actually acts -- true, and badly misleading.
+
+    Shells out to the Azure CLI rather than calling ARM directly: this is an
+    operator inspection command, and the operator already has a CLI login.
+    """
+    import json
+    import subprocess
+
+    if not principal_id:
+        return []
+    try:
+        proc = subprocess.run(
+            [
+                "az", "role", "assignment", "list",
+                "--assignee", principal_id, "--all",
+                "--query", "[].{role:roleDefinitionName, scope:scope}",
+                "-o", "json",
+            ],
+            capture_output=True, text=True, timeout=60, shell=True,
+        )
+        if proc.returncode != 0:
+            return []
+        assignments = json.loads(proc.stdout or "[]")
+    except Exception as exc:
+        logger.warning("Could not read Azure role assignments (%s)", type(exc).__name__)
+        return []
+
+    out: list[str] = []
+    for item in assignments:
+        role = str(item.get("role", ""))
+        scope = str(item.get("scope", ""))
+        # The resource name is the useful part; the full ARM path is noise.
+        resource = scope.rstrip("/").rsplit("/", 1)[-1] if scope else ""
+        out.append(f"{role} on {resource}" if resource else role)
+    return out
 
 
 class GraphReader(Protocol):

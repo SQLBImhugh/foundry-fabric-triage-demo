@@ -1,7 +1,11 @@
 # Build plan — BI Request Triage & Resolution demo
 
-**Status**: Phase 1 complete (offline demo runs end to end, 193 tests green).
-Phases 2–7 are tenant-dependent and not started.
+**Status**: Deployed and running unattended in Azure. The controller runs as a
+Foundry hosted agent with its own Entra agent identity, woken by a Foundry
+routine, reading a real mailbox and acting on a real Power BI dataset.
+235 tests green and still fully offline; the mock path remains the rehearsal
+fallback. See `docs/hosted-architecture.md` for what each identity can actually
+reach — including the things that only surfaced by trying them.
 
 **Goal**: a live, interactive demo of an agentic BI triage loop on Azure AI
 Foundry, executing both requested scenarios end to end, with the ability to
@@ -77,7 +81,7 @@ Everything runs with no tenant, no Azure login, no network.
 | OTel GenAI spans with no-op fallback | `src/triage_demo/observability.py` |
 | 5 scenarios with machine-checked assertions | `scenarios/` |
 | CLI with live event rendering | `src/triage_demo/cli.py` |
-| 193 tests | `tests/` |
+| 235 tests | `tests/` |
 
 **Exit criteria (met)**: all five scenarios pass their assertions offline;
 `ruff check` clean; every scenario produces the same outcome, the same tool

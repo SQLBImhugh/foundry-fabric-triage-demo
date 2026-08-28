@@ -118,7 +118,7 @@ scenarios/*.yaml       Seven runnable scenarios with assertions
 mock/                  Seeded data + four inbox messages
 scripts/               Foundry agent registration
 docs/                  Plan, architecture, run sheet, FAQ, provisioning
-tests/                 193 tests, all offline
+tests/                 235 tests, all offline
                        test_hardening.py pins the post-review fixes
 ```
 
@@ -133,6 +133,8 @@ tests/                 193 tests, all offline
 | How do I actually run the demo live? | [`docs/run-sheet.md`](docs/run-sheet.md) |
 | What do I say when they ask X? | [`docs/faq.md`](docs/faq.md) |
 | What has to exist in the tenant first? | [`docs/provisioning.md`](docs/provisioning.md) |
+| What runs where in Azure, and which identity does it? | [`docs/hosted-architecture.md`](docs/hosted-architecture.md) |
+| Why this model, and what happens if it's unavailable? | [`docs/model-selection.md`](docs/model-selection.md) |
 
 Open the walkthrough locally:
 
@@ -167,7 +169,7 @@ python scripts\register_foundry_agents.py --dry-run
 ## Tests
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q      # 193 tests, no network
+.\.venv\Scripts\python.exe -m pytest -q      # 235 tests, no network
 .\.venv\Scripts\python.exe -m ruff check .
 ```
 

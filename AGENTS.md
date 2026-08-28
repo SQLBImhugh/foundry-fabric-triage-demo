@@ -16,10 +16,16 @@ It runs fully offline. Keep it that way.
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 
-.\.venv\Scripts\python.exe -m pytest -q       # 193 tests, must stay offline
+.\.venv\Scripts\python.exe -m pytest -q       # 235 tests, must stay offline
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\triage-demo.exe list
 .\.venv\Scripts\triage-demo.exe run scenario1-transient
+.\.venv\Scripts\triage-demo.exe identity --check-scope   # who the agents are
+
+# Hosted (runs in Azure, no laptop in the loop)
+azd deploy bi-triage-controller --no-prompt
+azd ai agent invoke bi-triage-controller "sweep"
+azd ai agent monitor bi-triage-controller
 ```
 
 ## Invariants — do not break these
@@ -46,6 +52,23 @@ python -m venv .venv
 10. **Scenarios are reproducible.** Same input, same tool sequence, same numbers.
     A demo you cannot rehearse is a demo you should not give. When a live model
     and the mock diverge, make the **controller** decide so both agree.
+11. **The inbox filter is a security control, not housekeeping.** An agent that
+    acts on every message is steerable by anyone who can email it. The filter
+    fails closed — including when its own pattern is invalid — and counts what
+    it ignored rather than dropping it silently. Never widen it to "make the
+    demo find something"; send a message that matches instead.
+12. **Identity claims are read from the directory, never configured.** Whether
+    an agent holds a secret, what it can reach, and who sponsors it are read
+    live via Graph. A hardcoded claim about security posture is a claim that
+    will eventually be false without anyone noticing.
+13. **Grant permissions to the component that acts, not the one that reasons.**
+    The prompt agents hold no permissions at all. Only the controller does, and
+    each agent gets its own identity, so each needs its own grant. If a new
+    permission seems needed on a reasoning agent, the design is wrong.
+14. **A tool must fail loudly rather than return something interpretable.**
+    Calling Power BI with an empty id returned 404, and the model turned that
+    into a confident, wrong conclusion. Validate inputs at the boundary; a
+    plausible answer built on a failed call is the worst outcome available.
 
 ## Adding things
 

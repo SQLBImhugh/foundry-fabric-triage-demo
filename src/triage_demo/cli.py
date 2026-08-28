@@ -593,9 +593,11 @@ def _identity_panel(report) -> Panel:
         ", ".join(report.sponsors) if report.sponsors else "[yellow]none recorded[/yellow]",
     )
     t.add_row(
-        "permissions",
+        "Graph permissions",
         "\n".join(report.graph_app_roles) if report.graph_app_roles else "[dim]none[/dim]",
     )
+    if report.azure_roles:
+        t.add_row("Azure roles", "\n".join(report.azure_roles))
 
     proof = report.scope_proof
     if proof is not None:
@@ -614,6 +616,7 @@ def cmd_identity(args: argparse.Namespace) -> int:
         MailboxScopeProof,
         load_agent_identity,
         load_app_registration,
+        load_azure_roles,
         project_name_prefix,
     )
 
@@ -657,6 +660,9 @@ def cmd_identity(args: argparse.Namespace) -> int:
         if report is None:
             console.print(f"[yellow]No agent identity matching '{needle}'.[/yellow]")
             continue
+        if args.check_scope:
+            # Azure RBAC is where the acting component's real authority lives.
+            report.azure_roles = load_azure_roles(report.object_id)
         console.print(_identity_panel(report))
         found += 1
 
