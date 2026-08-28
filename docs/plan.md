@@ -49,9 +49,9 @@ letting them anchor on data quality as the use case.
 The recommendation is not to drop the DQ agent. It is to keep it in the role it
 naturally occupies: a **precondition gate** that answers "is this a data problem
 or a system problem?" before any remediation is considered. That is exactly the
-role `SchemaProbeAgent` plays in the production platform — a second agent that probes
-real data to verify a low-confidence decision and hands a structured finding
-back to the orchestrator.
+role `SchemaProbeAgent` plays in the production platform this is ported from — a
+second agent that probes real data to verify a low-confidence decision and hands
+a structured finding back to the orchestrator.
 
 Scenarios 3 and 4 exist because "can it fix things?" is answered in the first
 five minutes, and "what stops it breaking things?" is what determines whether
@@ -366,4 +366,4 @@ demo. They belong in the production table above, not in Phase 1.
 | Persist every terminal outcome | The original success-only gate hid 10 agent crashes over two weeks |
 | Validate outcome against evidence | An agent reported "Fixed" three times while the job kept failing |
 | Generic customer persona in the repo | Reusable for the next engagement; no customer name in a shared asset |
-| Python | Near-direct port of the the production platform components rather than a rewrite |
+| Python | Near-direct port of the production platform's components rather than a rewrite |

@@ -112,9 +112,10 @@ cap.
 ## Provenance
 
 The policy ledger, signature scheme, redaction patterns, incident model and
-outcome-validation rule are ported from **the production platform**, where equivalents
-run against real Microsoft Fabric deployments. When changing one of these,
-preserve the comment explaining which production failure motivated it.
+outcome-validation rule are ported from a **production Fabric operations
+platform**, where equivalents run against real Microsoft Fabric deployments.
+When changing one of these, preserve the comment explaining which production
+failure motivated it.
 
 ## Never
 

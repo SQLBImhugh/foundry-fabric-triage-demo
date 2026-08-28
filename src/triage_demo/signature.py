@@ -12,7 +12,7 @@ hex suffixes, temp paths, long hashes.
 **Case is preserved on purpose** — SQL identifier case is significant in some
 dialects and folding it merges genuinely distinct failures.
 
-Ported from the production platform ``backend/app/incidents/signature.py``.
+Ported from a production Fabric operations platform's incident signature module.
 """
 
 from __future__ import annotations

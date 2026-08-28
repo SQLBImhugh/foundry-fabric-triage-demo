@@ -7,10 +7,10 @@ This class owns the loop. The model proposes; the loop disposes. Concretely:
 * the terminal outcome is **validated against what actually happened**, not
   accepted from the model.
 
-That last point is load-bearing. the production platform shipped an autonomous
-recovery agent that reported "Fixed" three times in a row while the underlying
-notebook kept failing, because nothing checked the claim against the evidence.
-An agent's self-report is a hypothesis.
+That last point is load-bearing. An earlier production deployment shipped an
+autonomous recovery agent that reported "Fixed" three times in a row while the
+underlying notebook kept failing, because nothing checked the claim against the
+evidence. An agent's self-report is a hypothesis.
 """
 
 from __future__ import annotations

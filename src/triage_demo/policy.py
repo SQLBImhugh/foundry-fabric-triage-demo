@@ -4,9 +4,9 @@ The single most important design decision in this repo: **limits live in the
 controller, not in the prompt.** A prompt that says "only take one action" is
 a request. A ledger that refuses to dispatch a second write is a guarantee.
 
-Ported from the production platform's ``RecoveryPolicy`` / ``RecoveryAgent`` loop,
-where the same split has been running in production against real Microsoft
-Fabric deployments.
+Ported from a production Fabric operations platform's ``RecoveryPolicy`` /
+``RecoveryAgent`` loop, where the same split has been running against real
+Microsoft Fabric deployments.
 """
 
 from __future__ import annotations
@@ -113,7 +113,7 @@ class TriagePolicy:
     def from_settings(cls, settings) -> TriagePolicy:  # noqa: ANN001 - duck-typed
         """Rebuild from live settings so env changes actually take effect.
 
-        the production platform shipped a module-level constant here for months and
+        That system shipped a module-level constant here for months and
         silently ignored the two env vars operators were tuning. Don't repeat
         that: read settings at construction time.
         """

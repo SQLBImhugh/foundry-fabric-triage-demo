@@ -6,7 +6,7 @@ from triage_demo.store.incidents import InMemoryIncidentStore, JsonFileIncidentS
 
 
 def test_every_terminal_outcome_is_persisted(store: InMemoryIncidentStore, result_factory) -> None:
-    """The original the production platform gate recorded only successes and missed 10 crashes."""
+    """An earlier success-only gate recorded only successes and missed 10 crashes."""
     outcomes = [
         "resolved",
         "flagged_data_quality",

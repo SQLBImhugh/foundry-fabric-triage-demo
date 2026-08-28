@@ -184,7 +184,7 @@ def deps(tmp_path, clean_dataset) -> TriageDeps:
 
 
 async def test_unearned_success_is_downgraded(sample_request, deps) -> None:
-    """the production platform shipped an agent that reported 'Fixed' three times while failing."""
+    """A production agent reported 'Fixed' three times while the job kept failing."""
     provider = CannedProvider(
         responses=[
             _tool_response(

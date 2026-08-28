@@ -130,9 +130,10 @@ The agent's self-report is a hypothesis, not a result:
 - `flagged_data_quality` with no positive scan → downgraded to `needs_human`
 - an unrecognized outcome string → `needs_human`
 
-the production platform shipped an autonomous recovery agent that reported "Fixed" three
-times consecutively while the underlying notebook kept failing, because nothing
-compared the claim to the evidence. That is the bug this prevents.
+A production deployment shipped an autonomous recovery agent that reported
+"Fixed" three times consecutively while the underlying notebook kept failing,
+because nothing compared the claim to the evidence. That is the bug this
+prevents.
 
 ## Signatures and suppression
 
@@ -166,7 +167,7 @@ declared_failed · agent_crashed · timed_out · budget_exceeded
 max_turns_exceeded · policy_blocked
 ```
 
-The original the production platform gate was `status == "fixed"`. Ten Foundry agent
+The original production gate was `status == "fixed"`. Ten Foundry agent
 crashes over two weeks left zero trace in the queue operators actually read.
 
 `requires_investigation` is set for crashes, budget exhaustion, escalations, and

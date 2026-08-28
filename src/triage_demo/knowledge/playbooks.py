@@ -8,9 +8,9 @@ instructions that matter, and gets skimmed by the model exactly when it is long
 enough to be useful.
 
 So the catalogue lives here, and only the entries whose triggers match the
-incoming error are injected into the user message. Ported from the production platform's
-``troubleshooting_playbooks.py``, where the same pattern runs against real
-Microsoft Fabric deployments.
+incoming error are injected into the user message. Ported from a production
+Fabric operations platform's troubleshooting playbooks, where the same pattern
+runs against real Microsoft Fabric deployments.
 
 Why each entry carries a triage implication
 -------------------------------------------

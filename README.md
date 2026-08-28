@@ -70,9 +70,9 @@ and the disagreement is logged — see `test_contradicted_denial_discards_the_mo
 **Success has to be earned.** If the agent reports `resolved` but no remediation
 succeeded, `flagged_data_quality` but no flag row was written, or
 `duplicate_suppressed` but no open incident matched, the controller downgrades it
-to `needs_human`. This is not hypothetical: the production platform shipped a recovery
-agent that reported "Fixed" three times in a row while the underlying job kept
-failing.
+to `needs_human`. This is not hypothetical: a production deployment shipped a
+recovery agent that reported "Fixed" three times in a row while the underlying
+job kept failing.
 
 **Every terminal outcome is persisted** — crashes, timeouts and policy blocks
 included, not just successes. The same system originally recorded only
@@ -179,8 +179,8 @@ works — that is the entire reason they exist.
 ## Provenance
 
 The policy ledger, failure signatures, redaction patterns, incident model and
-"validate the outcome against the evidence" rule are ported from
-**the production platform**, where equivalents have been running against real Microsoft
-Fabric deployments. The comments call out which production incident motivated
-each one; those are the details worth repeating to a customer, because they are
-the ones nobody arrives at from first principles.
+"validate the outcome against the evidence" rule are ported from a **production
+Fabric operations platform**, where equivalents have been running against real
+Microsoft Fabric deployments. The comments call out which production incident
+motivated each one; those are the details worth repeating to a customer, because
+they are the ones nobody arrives at from first principles.

@@ -8,7 +8,7 @@ incident record, a Teams message, a trace attribute — goes through
 Enforced at the *boundary* (the store), not at the call sites, so a new code
 path cannot forget to call it.
 
-Ported from the production platform ``backend/app/incidents/redaction.py``.
+Ported from a production Fabric operations platform's incident redaction module.
 """
 
 from __future__ import annotations

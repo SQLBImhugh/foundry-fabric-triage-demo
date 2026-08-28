@@ -241,10 +241,10 @@ class TriageResult(BaseModel):
 class Incident(BaseModel):
     """A deduplicated failure record.
 
-    Persisted for EVERY terminal outcome, not just successes. the production platform
-    originally persisted only successful recoveries and consequently missed 10
-    agent crashes over two weeks — they left zero trace in the queue that
-    operators actually read.
+    Persisted for EVERY terminal outcome, not just successes. An earlier
+    production system persisted only successful recoveries and consequently
+    missed 10 agent crashes over two weeks — they left zero trace in the queue
+    that operators actually read.
     """
 
     id: str
