@@ -184,6 +184,17 @@ Seed the model from `mock/data/well_production.csv` (with duplicates) or
 Workflows → "Post to a channel when a webhook request is received"**. Complete
 the template and copy the generated HTTP POST URL into `TEAMS_WEBHOOK_URL`.
 
+**On automating this.** It was tested rather than assumed. Playwright driving
+Edge reaches Power Automate fully signed in with no credentials, because Windows
+SSO applies — but it signs in to the **corporate** tenant, not the demo tenant.
+A webhook created that way would land in the wrong place and still look like it
+had worked. `scripts/probe_browser_auth.py` reproduces the finding.
+
+So automation needs one interactive sign-in to the demo tenant first. After that
+the browser profile carries the session and the click-through could run
+unattended. Given the whole task is two minutes by hand and is done once per
+demo environment, that is rarely worth building.
+
 The payload shape is unchanged — `WorkflowsWebhookTeamsNotifier` posts the same
 Adaptive Card envelope — so only the URL source moved. Two differences worth
 mentioning before someone notices on screen:
