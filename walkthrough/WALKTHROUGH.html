@@ -1135,6 +1135,26 @@ footer a { color: var(--text-dim); }
     <br><br>
     Silence never reads as consent. There is a test named for it.
   </div>
+  
+  <div class="note">
+    <span class="label">Who actually answers</span>
+    The seven runs above use a scripted approver, because a rehearsal has to be
+    reproducible and cannot wait on a person. Outside a scenario &mdash; a live
+    mailbox sweep, or the agent invoked from Foundry &mdash; the real gate runs:
+    it writes the request to a table, posts the card, and polls until somebody
+    answers or it expires.
+    <br><br>
+    Two things can write that answer, and the agent cannot tell them apart:
+    the card's buttons, and <code>triage-demo approve</code> /
+    <code>deny</code>. The buttons are links rather than
+    <code>Action.Submit</code>, because a card posted through an incoming
+    webhook has no bot behind it &mdash; a submit button there renders a control
+    that silently does nothing, which is worse than no button.
+    <br><br>
+    While the agent waits, the run's wall clock stops. Both limits default to
+    300 seconds, so charging the agent for a person's reading time would kill
+    the run as <code>timed_out</code> at the moment the approval was granted.
+  </div>
 
   <div class="note">
     <span class="label">Why the gate is code, not prompt wording</span>

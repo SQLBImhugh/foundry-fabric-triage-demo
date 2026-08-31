@@ -11,9 +11,13 @@ Microsoft Fabric deployments.
 
 from __future__ import annotations
 
+import logging
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Literal
+
+logger = logging.getLogger("triage.policy")
 
 # ---------------------------------------------------------------------------
 # Action taxonomy
@@ -138,6 +142,13 @@ class PolicyLedger:
         self.policy = policy
         self._clock = clock
         self._started_at = clock()
+        #: Seconds spent blocked on a human, excluded from the wall clock.
+        #: The wall-clock budget exists to stop a runaway agent. Charging it for
+        #: the time a person spends reading an approval card makes the two
+        #: limits fight each other: with both set to 300s, the run is killed as
+        #: `timed_out` at the exact moment the approval was still valid, and the
+        #: fix is refused for a reason that has nothing to do with the decision.
+        self._human_wait_seconds = 0.0
         self.llm_turns = 0
         self.tool_calls = 0
         self.attempted_actions = 0
@@ -147,11 +158,30 @@ class PolicyLedger:
         #: Actions a human explicitly declined, or that no human answered.
         self.denied_actions: list[str] = []
 
+    @contextmanager
+    def awaiting_human(self):
+        """Stop the wall clock while a person decides.
+
+        Everything else the ledger measures stays charged: turns, tool calls
+        and tokens are the agent's consumption and are unaffected by waiting.
+        """
+        started = self._clock()
+        try:
+            yield
+        finally:
+            waited = self._clock() - started
+            self._human_wait_seconds += waited
+            logger.info("Excluded %.1fs of human wait from the wall clock", waited)
+
     # --- introspection -----------------------------------------------------
 
     @property
+    def human_wait_seconds(self) -> float:
+        return self._human_wait_seconds
+
+    @property
     def elapsed_seconds(self) -> float:
-        return self._clock() - self._started_at
+        return self._clock() - self._started_at - self._human_wait_seconds
 
     @property
     def elapsed_ms(self) -> int:

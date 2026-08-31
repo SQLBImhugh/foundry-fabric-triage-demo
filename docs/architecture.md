@@ -174,6 +174,44 @@ tracked in the mailbox: the agent holds `Mail.Read` and deliberately cannot mark
 a message read or move it. A message is marked only *after* its outcome is
 persisted, so a crash mid-run re-triages rather than dropping the alert.
 
+## Human approval
+
+`rebind_dataset_gateway` is the only action in `APPROVAL_REQUIRED_ACTIONS`. Its
+blast radius covers every dataset bound to that gateway, so the decision belongs
+to someone who knows what else is on it. Membership is a code change and a
+review — that is the difference between "the agent was told to ask" and "the
+agent cannot proceed without an answer".
+
+The gate sits in front of dispatch in `ToolDispatcher`, so an unapproved action
+is never executed regardless of what the model asked for.
+
+**Where a decision lives.** `store/approvals.py`, one row per request, updated
+in place. The agent writes the request before posting the card; a human writes
+the answer from somewhere else entirely; the agent reads it back on a later
+poll. It has to be durable shared state — the writer and the reader are
+different processes, and on a hosted agent often different invocations.
+
+**Who can answer.** Two writers, and the agent cannot tell them apart:
+
+| Channel | Needs | Use |
+|---|---|---|
+| `triage-demo approve` / `deny` | nothing | Rehearsal, and how an on-call engineer would actually answer |
+| The card's buttons | `APPROVAL_CALLBACK_URL` | The demo path: a click in Teams |
+
+The buttons are `Action.OpenUrl`, not `Action.Submit`. A card posted through an
+incoming webhook has no bot behind it, so a submit button renders a control that
+silently does nothing — which looks exactly like a recorded decision.
+
+**The clock stops while a person decides.** `PolicyLedger.awaiting_human()`
+excludes that time from the wall clock. The run timeout and the approval timeout
+both default to 300s, so charging the agent for reading time would fail the run
+as `timed_out` at the moment the approval was granted. Turns, tool calls and
+tokens stay charged — those are the agent's consumption, not the human's.
+
+Validation is unchanged and stays on the reading side: explicit, fingerprint
+matches the exact action *and* arguments, unexpired, single-use. Anything else
+is not approved.
+
 ## The incident store
 
 Every terminal outcome is persisted:

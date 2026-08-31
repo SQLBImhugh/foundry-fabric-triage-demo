@@ -87,6 +87,19 @@ services:
               value: https://bitriagestore6343.table.core.windows.net/
             - name: INCIDENT_TABLE_NAME
               value: incidents
+            # Approval requests wait here and human decisions land here. It
+            # has to be shared, durable state: the agent writes the request
+            # in one invocation and a person answers from somewhere else
+            # entirely -- a Teams card, or `triage-demo approve`.
+            - name: APPROVAL_TABLE_NAME
+              value: approvals
+            # The URL behind the card's Approve/Decline buttons. A card
+            # posted through an incoming webhook has no bot behind it, so
+            # Action.Submit does nothing; the buttons have to be links to
+            # something that writes the decision. Left unset, the card shows
+            # the request id and the CLI is the channel.
+            - name: APPROVAL_CALLBACK_URL
+              value: ${APPROVAL_CALLBACK_URL}
             # Live Power BI. No client id or secret: Power BI accepts this
             # agent identity as a workspace principal, so the controller
             # triggers refreshes and reads refresh history as itself.

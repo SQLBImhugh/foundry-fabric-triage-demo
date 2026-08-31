@@ -459,7 +459,11 @@ class ToolDispatcher:
                 ),
             }
 
-        decision = await gate.request_approval(request)
+        # The clock stops here. Waiting on a person is not the agent consuming
+        # budget, and with both limits at 300s an honest approval would other-
+        # wise kill the run as `timed_out` at the moment it was granted.
+        with ctx.ledger.awaiting_human():
+            decision = await gate.request_approval(request)
         waited_ms = int((time.monotonic() - started) * 1000)
 
         valid, why = decision.is_valid_for(request)

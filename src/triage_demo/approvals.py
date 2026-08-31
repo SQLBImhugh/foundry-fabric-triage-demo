@@ -51,6 +51,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
+from urllib.parse import quote
 
 logger = logging.getLogger("triage.approvals")
 
@@ -272,11 +273,40 @@ class TeamsCardApprovalGate(_BaseGate):
         decision_source: Any | None = None,
         *,
         poll_seconds: float = 5.0,
+        callback_url: str = "",
     ):
         super().__init__()
         self._notifier = notifier
         self._decision_source = decision_source
         self._poll_seconds = poll_seconds
+        self._callback_url = callback_url
+
+    def _actions(self, request: ApprovalRequest) -> list[dict[str, Any]]:
+        """Buttons, but only ones that do something.
+
+        A card posted through an incoming webhook has no bot behind it, so
+        ``Action.Submit`` renders a button that silently does nothing -- worse
+        than no button, because it looks like the decision was recorded. When
+        no callback is configured the card carries the request id instead and
+        the answer comes from ``triage-demo approve|deny``.
+        """
+        if not self._callback_url:
+            return []
+
+        separator = "&" if "?" in self._callback_url else "?"
+        return [
+            {
+                "type": "Action.OpenUrl",
+                "title": title,
+                "url": (
+                    f"{self._callback_url}{separator}"
+                    f"request_id={quote(request.request_id, safe='')}"
+                    f"&fingerprint={quote(request.fingerprint, safe='')}"
+                    f"&decision={verb}"
+                ),
+            }
+            for title, verb in (("Approve", "approve"), ("Decline", "decline"))
+        ]
 
     def build_card(self, request: ApprovalRequest) -> dict[str, Any]:
         """Adaptive Card with the decision and its consequences on it.
@@ -284,6 +314,15 @@ class TeamsCardApprovalGate(_BaseGate):
         The fingerprint is carried in the action payload so the answer can be
         tied back to exactly what was asked.
         """
+        instruction = (
+            "No response means no action. The agent will escalate rather than proceed."
+        )
+        if not self._callback_url:
+            instruction += (
+                f"\n\nAnswer with: triage-demo approve {request.request_id} "
+                f"— or deny, with a reason."
+            )
+
         return {
             "type": "message",
             "attachments": [
@@ -311,38 +350,18 @@ class TeamsCardApprovalGate(_BaseGate):
                                         "title": "Expires",
                                         "value": request.expires_at.isoformat(timespec="seconds"),
                                     },
+                                    {"title": "Request", "value": request.request_id},
+                                    {"title": "Fingerprint", "value": request.fingerprint},
                                 ],
                             },
                             {
                                 "type": "TextBlock",
                                 "wrap": True,
                                 "isSubtle": True,
-                                "text": (
-                                    "No response means no action. The agent will escalate "
-                                    "rather than proceed."
-                                ),
+                                "text": instruction,
                             },
                         ],
-                        "actions": [
-                            {
-                                "type": "Action.Submit",
-                                "title": "Approve",
-                                "data": {
-                                    "decision": "approve",
-                                    "request_id": request.request_id,
-                                    "fingerprint": request.fingerprint,
-                                },
-                            },
-                            {
-                                "type": "Action.Submit",
-                                "title": "Decline",
-                                "data": {
-                                    "decision": "decline",
-                                    "request_id": request.request_id,
-                                    "fingerprint": request.fingerprint,
-                                },
-                            },
-                        ],
+                        "actions": self._actions(request),
                     },
                 }
             ],
@@ -350,6 +369,27 @@ class TeamsCardApprovalGate(_BaseGate):
 
     async def request_approval(self, request: ApprovalRequest) -> ApprovalDecision:
         import asyncio
+
+        # Register what is being asked *before* asking, so a decision can never
+        # arrive against a request nobody recorded -- and so `triage-demo
+        # approvals` can show what is waiting even if the card never lands.
+        if self._decision_source is not None:
+            opener = getattr(self._decision_source, "open", None)
+            if opener is not None:
+                try:
+                    opener(request)
+                except Exception as exc:  # noqa: BLE001
+                    logger.error(
+                        "Could not open approval %s (%s); failing closed",
+                        request.request_id,
+                        type(exc).__name__,
+                    )
+                    return ApprovalDecision(
+                        granted=False,
+                        fingerprint=request.fingerprint,
+                        reason="The approval request could not be recorded.",
+                        outcome="error",
+                    )
 
         try:
             await self._post(request)

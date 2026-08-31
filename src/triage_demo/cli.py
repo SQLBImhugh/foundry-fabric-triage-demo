@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -795,8 +796,95 @@ def cmd_reset(args: argparse.Namespace) -> int:
     processed = runner.build_processed_log()
     processed.reset()
 
-    console.print("[green]Flag table, incident store and processed-mail log cleared.[/green]")
+    # And any half-answered approval. A stale pending row makes `approvals`
+    # show something nobody is waiting for; a stale decided row is worse,
+    # because the next request reusing that id would find an answer already
+    # sitting there.
+    runner.build_approval_channel().reset()
+
+    console.print(
+        "[green]Flag table, incident store, processed-mail log and approvals cleared.[/green]"
+    )
     return 0
+
+
+def cmd_approvals(args: argparse.Namespace) -> int:
+    """Show what is waiting on a human right now."""
+    runner = TriageRunner(settings, base_dir=REPO_ROOT)
+    rows = runner.build_approval_channel().pending()
+
+    if not rows:
+        console.print("[dim]Nothing awaiting approval.[/dim]")
+        return 0
+
+    table = Table(title="Awaiting a human")
+    table.add_column("Request")
+    table.add_column("Action")
+    table.add_column("Report")
+    table.add_column("Expires")
+    table.add_column("Impact")
+    for row in rows:
+        table.add_row(
+            str(row.get("request_id", "")),
+            str(row.get("action", "")),
+            str(row.get("report_name", "")),
+            str(row.get("expires_at", "")),
+            str(row.get("impact", ""))[:70],
+        )
+    console.print(table)
+    console.print(
+        "\n[dim]Answer with:[/dim] triage-demo approve <request> "
+        "[dim]or[/dim] triage-demo deny <request> --reason \"...\""
+    )
+    return 0
+
+
+def _decide(args: argparse.Namespace, decision: str) -> int:
+    """Record one human decision against one open request.
+
+    The agent still validates it: this only writes an answer. Fingerprint,
+    expiry and single-use are all checked on the reading side, so nothing
+    written here can authorise more than the action it was asked about.
+    """
+    runner = TriageRunner(settings, base_dir=REPO_ROOT)
+    channel = runner.build_approval_channel()
+
+    responder = args.responder or os.environ.get("USERNAME") or "unknown"
+    try:
+        row = channel.decide(
+            args.request_id,
+            decision=decision,
+            responder=responder,
+            reason=args.reason or "",
+        )
+    except KeyError:
+        console.print(
+            f"[red]No open approval request with id[/red] {args.request_id}\n"
+            "[dim]Run `triage-demo approvals` to see what is waiting.[/dim]"
+        )
+        return 2
+    except ValueError as exc:
+        # Answering twice is a real mistake worth reporting, not something to
+        # paper over: the second answer is not the one that took effect.
+        console.print(f"[red]{exc}[/red]")
+        return 2
+
+    verb = "Approved" if decision == "approve" else "Declined"
+    colour = "green" if decision == "approve" else "yellow"
+    console.print(
+        f"[{colour}]{verb}[/{colour}] {row['action']} on "
+        f"{row.get('report_name') or 'the affected report'} as {responder}."
+    )
+    console.print(f"[dim]Expires {row.get('expires_at', '')} — the agent must use it before then.[/dim]")
+    return 0
+
+
+def cmd_approve(args: argparse.Namespace) -> int:
+    return _decide(args, "approve")
+
+
+def cmd_deny(args: argparse.Namespace) -> int:
+    return _decide(args, "decline")
 
 
 def cmd_tools(args: argparse.Namespace) -> int:
@@ -892,6 +980,22 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("preflight", help="Verify configuration").set_defaults(func=cmd_preflight)
     sub.add_parser("reset", help="Clear flags and incidents").set_defaults(func=cmd_reset)
     sub.add_parser("tools", help="Print agent tool schemas").set_defaults(func=cmd_tools)
+
+    sub.add_parser(
+        "approvals", help="Show actions awaiting a human decision"
+    ).set_defaults(func=cmd_approvals)
+
+    for verb, handler, helptext in (
+        ("approve", cmd_approve, "Authorise a pending action"),
+        ("deny", cmd_deny, "Refuse a pending action"),
+    ):
+        decide = sub.add_parser(verb, help=helptext)
+        decide.add_argument("request_id", help="From `triage-demo approvals`")
+        decide.add_argument("--reason", default="", help="Shown to the agent and recorded")
+        decide.add_argument(
+            "--responder", default="", help="Who decided. Defaults to the signed-in user"
+        )
+        decide.set_defaults(func=handler)
 
     return parser
 

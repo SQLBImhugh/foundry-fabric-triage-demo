@@ -25,6 +25,7 @@ from triage_demo.models import BIRequest, Incident, TriageResult
 from triage_demo.policy import TriagePolicy
 from triage_demo.providers import get_provider
 from triage_demo.signature import compute_signature
+from triage_demo.store.approvals import JsonFileApprovalChannel
 from triage_demo.store.incidents import IncidentStore, JsonFileIncidentStore
 from triage_demo.store.processed import JsonFileProcessedLog
 from triage_demo.tools.dataset import DatasetSource
@@ -223,27 +224,68 @@ class TriageRunner:
             history=list(scenario.refresh_history) if scenario else [],
         )
 
+    def build_approval_channel(self):
+        """Where approval requests wait and decisions land.
+
+        Same choice as the incident store: the table when one is configured, a
+        JSON file otherwise. It has to be shared state either way -- the whole
+        point is that a *different* process writes the answer.
+        """
+        endpoint = self.settings.incident_table_endpoint
+        if not endpoint:
+            return JsonFileApprovalChannel(self.base_dir / "runs" / "approvals.json")
+
+        from triage_demo.store.approvals import AzureTableApprovalChannel
+
+        channel = AzureTableApprovalChannel(
+            endpoint=endpoint, table_name=self.settings.approval_table_name
+        )
+        if not channel.is_durable:
+            logger.error(
+                "Approval channel at %s is not durable; no human can answer and every "
+                "gated action will fail closed",
+                endpoint,
+            )
+        return channel
+
     def build_approval_gate(self, scenario: Scenario | None):
         """Choose the approval channel for this run.
 
         ``none`` is a real, testable configuration, not an oversight: an
         approval-required action with nowhere to send the request must be
         refused rather than quietly executed.
-        """
-        from triage_demo.approvals import AutoApproveGate, AutoDenyGate, TimeoutGate
 
-        mode = scenario.approval if scenario else "auto_approve"
+        A scenario always wins, because a rehearsal has to be reproducible and
+        cannot wait on a person. Outside a scenario -- a live sweep, or the
+        agent invoked from Foundry -- the real gate is used, which posts a card
+        and waits for an actual decision.
+        """
+        from triage_demo.approvals import (
+            AutoApproveGate,
+            AutoDenyGate,
+            TeamsCardApprovalGate,
+            TimeoutGate,
+        )
+
+        if scenario is None:
+            channel = self.build_approval_channel()
+            return TeamsCardApprovalGate(
+                self.build_teams(),
+                decision_source=channel,
+                callback_url=self.settings.approval_callback_url,
+            )
+
+        mode = scenario.approval
         if mode == "none":
             return None
         if mode == "auto_deny":
             return AutoDenyGate(
-                approver=scenario.approver if scenario else "",
-                reason=(scenario.approval_reason if scenario and scenario.approval_reason
-                        else "Declined."),
+                approver=scenario.approver,
+                reason=(scenario.approval_reason or "Declined."),
             )
         if mode == "timeout":
             return TimeoutGate()
-        return AutoApproveGate(approver=scenario.approver if scenario else "")
+        return AutoApproveGate(approver=scenario.approver)
 
     def build_teams(self):
         """One notifier per runner, so what was posted stays inspectable.

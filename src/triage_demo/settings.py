@@ -79,6 +79,17 @@ class Settings(BaseSettings):
     # endpoint because it shares its lifetime: both must outlive a hosted
     # agent invocation or a scheduled sweep re-triages everything it sees.
     processed_table_name: str = "processedmessages"
+    # Where approval requests wait and decisions land. Same endpoint again:
+    # the agent writes the request, a human writes the answer, and the agent
+    # reads it back on a later poll -- possibly in a different process.
+    approval_table_name: str = "approvals"
+    # The URL behind the card's Approve/Decline buttons. An incoming webhook
+    # has no bot behind it, so Action.Submit does nothing; the buttons have to
+    # be links to something that records the decision. Empty means the card
+    # shows the request without buttons and the CLI is the only channel.
+    approval_callback_url: str = ""
+    # How long a gated action waits for an answer before failing closed.
+    approval_timeout_seconds: int = 300
     # Set once an Exchange ApplicationAccessPolicy scopes the app registration
     # to `graph_mailbox`. Preflight warns loudly while this is False, because an
     # unscoped app-only Mail.Read grant can read EVERY mailbox in the tenant.
