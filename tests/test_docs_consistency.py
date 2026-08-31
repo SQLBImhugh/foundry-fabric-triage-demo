@@ -106,3 +106,23 @@ def test_teams_delivery_claim_matches_reality() -> None:
         "The walkthrough must either show the real posted card or say delivery "
         "is unwired -- not both, and not neither."
     )
+
+
+def test_the_walkthrough_does_not_contradict_itself_on_test_count() -> None:
+    """Two places quoted two different numbers, and both were wrong.
+
+    The header chip said 287 while the footer still said 193, four days and
+    ~120 tests after either was true. Pinning the exact number here would be
+    circular -- adding a test would fail it -- but the page agreeing with
+    itself is a real, non-circular property, and it is the one that broke.
+    """
+    walkthrough = (REPO_ROOT / "walkthrough" / "WALKTHROUGH.html").read_text(
+        encoding="utf-8", errors="ignore"
+    )
+    claimed = set(re.findall(r"(\d+)\s+(?:offline\s+tests|tests\s+pass\s+offline)", walkthrough))
+
+    assert claimed, "The walkthrough should state how many tests pass offline"
+    assert len(claimed) == 1, (
+        f"The walkthrough quotes conflicting test counts: {sorted(claimed)}. "
+        "Every mention must agree."
+    )
