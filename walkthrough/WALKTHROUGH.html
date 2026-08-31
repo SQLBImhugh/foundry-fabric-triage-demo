@@ -28,24 +28,22 @@
 <div class="wrap">
 
 <header class="hero">
-  <h1>A BI failure arrives by email.<br>Two agents decide what happens next.</h1>
+  <h1>Multi-agent triage for<br>Power BI refresh failures</h1>
   <p class="sub">
-    This document walks through a working multi-agent triage system on Microsoft Foundry —
-    what each part is, what it did when we ran it, and where the boundaries are.
-    Every screenshot is from a live run against a real Foundry project.
+    What each part is, what it did on a live run, and where the boundaries are. All screenshots are from live runs, not mock-ups.
   </p>
   <div class="meta-row">
     <span class="chip">project <b>bi-request-triage</b></span>
     <span class="chip">model <b>gpt-5.6-luna</b></span>
     <span class="chip on">7 / 7 scenarios passing live</span>
-    <span class="chip on">193 offline tests</span>
-    <span class="chip">captured 27 Aug 2026</span>
+    <span class="chip on">287 offline tests</span>
+    <span class="chip">captured 31 Aug 2026</span>
   </div>
 </header>
 
 <!-- ══════════════════════════════════════════════════════════════════ -->
 <section id="what">
-  <h2><span class="num">A</span> What this system does</h2>
+  <h2><span class="num">A</span> What it does</h2>
   <p class="lede">
     A Power BI refresh fails. The alert lands in a monitored mailbox. From there, no human is
     involved unless the system decides one should be.
@@ -59,17 +57,15 @@
   </p>
 
   <p>
-    The interesting part is not that it can fix things. Anyone can wire a model to a refresh button.
-    The interesting part is what stops it refreshing forty times during an outage, or doing something
+    Connecting a model to a refresh button is straightforward. The constraints are the substance: what stops it refreshing forty times during an outage, or doing something
     nobody asked for — and what it does when the right fix is bigger than it is allowed to make.
     Four of the seven runs below are about that.
   </p>
 
   <div class="note">
-    <span class="label">The one-sentence version</span>
+    <span class="label">Summary</span>
     The model decides what to <em>propose</em>; a controller decides what is allowed to
-    <em>happen</em>. Those are deliberately different things, and the gap between them is where the
-    safety lives.
+    <em>happen</em>. They are separate by design.
   </div>
 </section>
 
@@ -209,8 +205,7 @@
         <b>Version 2.</b> The definition shown is the one that will serve the next request.
       </span></li>
       <li><span class="n c3">3</span><span class="txt">
-        <b>Seven tools — and that is the entire list.</b> This is the complete set of things this
-        agent can do. Anything outside it is refused before it executes, which is demonstrated in
+        <b>Seven tools.</b> This is the complete set of actions this agent can perform. Anything outside it is refused before it executes, which is demonstrated in
         run 5. Note <code>consult_data_quality_agent</code>: the handoff to the second agent is
         itself a tool, so it is subject to the same accounting as everything else.
       </span></li>
@@ -253,8 +248,7 @@
 
   <div class="note warn">
     <span class="label">Why indirect-attack detection matters in this specific system</span>
-    This agent reads <b>email</b> — text written by someone outside your organisation. That is the
-    textbook vector for indirect prompt injection: instructions hidden in content the agent is asked
+    This agent reads <b>email</b> — text written by someone outside your organisation. That is the standard vector for indirect prompt injection: instructions hidden in content the agent is asked
     to process. Foundry screens for it on every call and reports the result inline, so we can show
     that the check ran rather than assert that it did.
     <br><br>
@@ -306,12 +300,9 @@
 <!-- ══════════════════════════════════════════════════════════════════ -->
 <!-- ══════════════════════════════════════════════════════════════════ -->
 <section id="identity">
-  <h2><span class="num">D</span> Who these agents are, and who is accountable</h2>
+  <h2><span class="num">D</span> Agent identity</h2>
   <p class="lede">
-    Before what the agents <em>do</em>, it is worth knowing what they <em>are</em>. Each one has its
-    own identity in Microsoft Entra, created automatically. That changes three answers a security
-    review will ask for: what credential does it hold, what can it reach, and who is responsible
-    for it.
+    Each agent has its own identity in Microsoft Entra, created automatically. That determines what credential it holds, what it can reach, and who is accountable for it.
   </p>
 
   <div class="figure">
@@ -345,7 +336,7 @@
         read a mailbox it should not.
       </span></li>
       <li><span class="n c5">5</span><span class="txt">
-        <b>The last panel is deliberately unflattering.</b> One conventional app registration
+        <b>The last panel is the app registration.</b> One conventional app registration
         remains, with <code>passwords=1</code>, an expiry date, and no sponsor. It exists because
         mailbox access is the one door an agent identity cannot open yet: with the same token,
         Microsoft Graph’s directory endpoint returned <code>200</code> and the Exchange-backed mail
@@ -358,11 +349,10 @@
 
 <!-- ══════════════════════════════════════════════════════════════════ -->
 <section id="hosted">
-  <h2><span class="num">E</span> It runs in Azure, invoked on a schedule</h2>
+  <h2><span class="num">E</span> Hosted deployment</h2>
   <p class="lede">
-    Everything above runs as a deployed Foundry <b>hosted agent</b> — a container in your
-    subscription — with no laptop involved. This is the difference between a demonstration and
-    something you could actually operate.
+    The controller runs as a Foundry <b>hosted agent</b>: a container in your subscription, with no
+    laptop involved.
   </p>
 
   <p class="note">
@@ -392,8 +382,8 @@
       </span></li>
       <li><span class="n c3">3</span><span class="txt">
         <b>It declined to retry, and said why.</b> A credentials failure is not fixed by refreshing,
-        so retrying would burn the single permitted remediation on an action that cannot work. The
-        agent escalated instead. Knowing when <em>not</em> to act is the harder half.
+        so retrying would spend the single permitted remediation on an action that cannot work. The
+        agent escalated instead.
       </span></li>
     </ul>
   </div>
@@ -432,10 +422,10 @@
 
 <!-- ══════════════════════════════════════════════════════════════════ -->
 <section id="run1">
-  <h2><span class="num">1</span> A transient failure, resolved</h2>
+  <h2><span class="num">1</span> Transient failure — resolved</h2>
   <p class="lede">
-    The straightforward case: a scheduled refresh timed out. Nothing is wrong with the data, and the
-    failure is isolated, so one retry is the correct answer.
+    A scheduled refresh timed out. The data is sound and the failure is isolated, so one retry is
+    correct.
   </p>
 
   <div class="figure">
@@ -472,7 +462,7 @@
 
 <!-- ══════════════════════════════════════════════════════════════════ -->
 <section id="run2">
-  <h2><span class="num">2</span> A data quality issue — found, flagged, not fixed</h2>
+  <h2><span class="num">2</span> Data quality issue — flagged, not fixed</h2>
   <p class="lede">
     The refresh failed with a duplicate-key error that does not say which rows are at fault. The
     system answers that question, records it, and deliberately stops.
@@ -494,7 +484,7 @@
       </span></li>
       <li><span class="n c3">3</span><span class="txt">
         <b>A row is written to the data quality flag table</b> — affected table, issue type, counts,
-        detail. That is the durable artifact a data steward picks up tomorrow.
+        detail. This is the record a data steward picks up.
       </span></li>
       <li><span class="n c4">4</span><span class="txt">
         <b>No remediation is attempted, and the ledger confirms it.</b> This is a decision, not a
@@ -509,10 +499,10 @@
 
 <!-- ══════════════════════════════════════════════════════════════════ -->
 <section id="run3">
-  <h2><span class="num">3</span> The same alert again — suppressed</h2>
+  <h2><span class="num">3</span> Duplicate alert — suppressed</h2>
   <p class="lede">
-    During a real outage the alert does not arrive once. It arrives every fifteen minutes for two
-    hours. This is what stops the system reacting to each one.
+    During an outage the same alert arrives repeatedly. This is the deduplication that stops the
+    system acting on each one.
   </p>
 
   <div class="figure">
@@ -540,9 +530,9 @@
 
 <!-- ══════════════════════════════════════════════════════════════════ -->
 <section id="run4">
-  <h2><span class="num">4</span> The agent asks for a second fix — and is refused</h2>
+  <h2><span class="num">4</span> Second remediation — refused by policy</h2>
   <p class="lede">
-    Everything so far assumed the agent behaves. This run is what happens when it does not.
+    This run tests the write budget: the agent requests a second remediation after already using one.
   </p>
 
   <div class="figure">
@@ -580,10 +570,10 @@
 
 <!-- ══════════════════════════════════════════════════════════════════ -->
 <section id="run5">
-  <h2><span class="num">5</span> An action nobody authorised</h2>
+  <h2><span class="num">5</span> Action outside the allowlist</h2>
   <p class="lede">
-    The previous run tested a budget. This one tests the boundary: the agent asks to delete the
-    dataset.
+    This run tests the allowlist: the agent requests <code>delete_dataset</code>, which is not a
+    permitted action.
   </p>
 
   <div class="figure">
@@ -610,8 +600,7 @@
         not, or the instructions need work. Both warrant a look.
       </span></li>
       <li><span class="n c1">5</span><span class="txt">
-        <b>Adding a capability is a code change and a review</b>, not a prompt edit. That is the
-        property that makes the allowlist worth having at all.
+        <b>Adding a capability is a code change and a review</b>, not a prompt edit.
       </span></li>
     </ul>
   </div>
@@ -619,11 +608,9 @@
 
 <!-- ══════════════════════════════════════════════════════════════════ -->
 <section id="run6">
-  <h2><span class="num">6</span> The agent proposes; a human decides</h2>
+  <h2><span class="num">6</span> Approval granted</h2>
   <p class="lede">
-    The same gateway failure three mornings running. Another refresh would
-    reproduce it, so the correct fix is a bigger one — and a bigger fix is not
-    the agent's to make.
+    The same gateway failure on three consecutive mornings. Another refresh would reproduce it, so the fix is a gateway rebind — an action that requires approval.
   </p>
 
   <p>
@@ -664,10 +651,9 @@
 
 <!-- ══════════════════════════════════════════════════════════════════ -->
 <section id="run7">
-  <h2><span class="num">7</span> The human says no</h2>
+  <h2><span class="num">7</span> Approval denied</h2>
   <p class="lede">
-    Identical up to the decision. This time the answer is no, and nothing
-    happens — which is the system working, not failing.
+    Identical to the previous run up to the decision. This time the approver declines.
   </p>
 
   <div class="figure">
@@ -693,8 +679,7 @@
         <b>The outcome is <code>approval_denied</code>, not <code>needs_human</code>.</b>
         They are different facts and belong in different buckets. A denial is the
         highest-signal event the system produces: the agent proposed something a
-        person judged wrong, which is exactly what you mine to decide what to
-        automate next — and what never to.
+        person judged wrong, which informs what to automate next — and what never to.
       </span></li>
     </ul>
   </div>
@@ -722,10 +707,9 @@
 <!-- ══════════════════════════════════════════════════════════════════ -->
 <!-- ══════════════════════════════════════════════════════════════════ -->
 <section id="teams">
-  <h2><span class="num">F</span> What the humans actually see</h2>
+  <h2><span class="num">F</span> Notifications</h2>
   <p class="lede">
-    Every terminal outcome produces a notification — resolved, refused, escalated, denied. The point
-    is not that it posts when things go well; it is that it posts when they do not.
+    Every terminal outcome produces a notification: resolved, refused, escalated or denied.
   </p>
 
   <div class="figure">
@@ -746,8 +730,7 @@
       <li><span class="n c3">3</span><span class="txt">
         <b>The reasoning is in the card.</b> "Refresh history contained only two prior API failures
         (no scheduled runs), so schedule deactivation is not at risk." That distinction between
-        API-triggered and scheduled failures is the difference between a correct answer and a
-        plausible one, and it is stated where a human can check it.
+        API-triggered and scheduled failures is what makes the answer correct rather than plausible, and it is stated where a human can check it.
       </span></li>
       <li><span class="n c4">4</span><span class="txt">
         <b>It says what it did <em>not</em> do.</b> "No further automated retry was attempted" —
@@ -772,10 +755,9 @@
 
 <!-- ══════════════════════════════════════════════════════════════════ -->
 <section id="native">
-  <h2><span class="num">G</span> What Foundry provides, and what we wrote</h2>
+  <h2><span class="num">G</span> Foundry features vs. custom code</h2>
   <p class="lede">
-    Almost every component is a platform feature. The exception is worth understanding, because it
-    is the part that encodes <em>your</em> operating rules.
+    Most components are platform features. The exception is the policy layer, which encodes your operating rules.
   </p>
 
   <table>
@@ -829,9 +811,9 @@
 
 <!-- ══════════════════════════════════════════════════════════════════ -->
 <section id="limits">
-  <h2><span class="num">H</span> Limitations, honestly</h2>
+  <h2><span class="num">H</span> Limitations</h2>
   <p class="lede">
-    What this build does not do, and what we would want to resolve before anyone depended on it.
+    What this build does not do, and what to resolve before depending on it.
   </p>
 
   <h3>Not yet wired</h3>
@@ -886,8 +868,7 @@
   <div class="note">
     <span class="label">Effort, for calibration</span>
     The agents were roughly a day. The surrounding work — identity, permissions, provisioning, the
-    trigger — was most of the effort. That is the opposite of what most people expect, and it is the
-    most useful thing to take from this document. A production-grade equivalent is weeks, and most of
+    trigger — was most of the effort. That is worth stating plainly, and it is the most useful thing to take from this document. A production-grade equivalent is weeks, and most of
     those weeks are not agent work: per-tenant budgets, secret handling at every boundary, a durable
     incident store, alerting, replay-based regression testing, and the human-approval branch above.
   </div>
