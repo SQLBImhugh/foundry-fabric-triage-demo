@@ -82,6 +82,24 @@ def test_pages_are_not_stale(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", PAGES)
+def test_stylesheet_source_still_exists(name: str) -> None:
+    """``walkthrough.css`` is the source; the embedded copy is output.
+
+    Deleting the stylesheet does not break either page -- they are
+    self-contained and keep rendering. It breaks the ability to change them,
+    and without this test nothing reports it.
+    """
+    recorded = re.findall(r'<style\b[^>]*\bdata-src="([^"]+)"', _read(name))
+    assert recorded, f"{name} has no inlined stylesheet"
+
+    for rel in recorded:
+        assert (WALKTHROUGH / rel).exists(), (
+            f"{name} embeds {rel}, which no longer exists on disk -- the "
+            "embedded copy is generated output and cannot be regenerated"
+        )
+
+
+@pytest.mark.parametrize("name", PAGES)
 def test_embedded_svgs_fetch_no_fonts(name: str) -> None:
     """Rich writes its terminal SVGs with @font-face rules pointing at a CDN.
 

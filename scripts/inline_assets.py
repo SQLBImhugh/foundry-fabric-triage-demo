@@ -86,8 +86,14 @@ def inline_css(html: str, base: Path) -> tuple[str, int]:
         rel = match.group(1)
         path = base / rel
         if not path.exists():
-            logger.warning("stylesheet not found, left alone: %s", rel)
-            return match.group(0)
+            # The embedded copy is generated output. Losing the source leaves a
+            # few hundred lines of CSS duplicated across two files with nothing
+            # to regenerate them from, and the pages keep rendering, so this has
+            # to be loud or it is invisible.
+            raise FileNotFoundError(
+                f"{rel} is referenced by the walkthrough but does not exist; "
+                "the inlined stylesheet cannot be maintained without it"
+            )
         count += 1
         return f'<style data-src="{rel}">\n{path.read_text(encoding="utf-8").strip()}\n</style>'
 
