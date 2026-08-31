@@ -226,6 +226,18 @@ Validation is unchanged and stays on the reading side: explicit, fingerprint
 matches the exact action *and* arguments, unexpired, single-use. Anything else
 is not approved.
 
+**The card cannot show that it was answered.** `Action.OpenUrl` is a link — it
+cannot alter the card it sits on — and an incoming webhook cannot edit a message
+it already posted. So the original card keeps its Approve/Decline buttons
+forever. A second click is refused by the callback and again by the agent, but
+nothing on the card itself says so.
+
+The controller therefore posts a short acknowledgement naming who decided and
+what happens next. That is what a channel reading back over an outage actually
+needs. It goes straight to the notifier rather than through `notify_teams`: that
+path is deduplicated per incident, so routing an acknowledgement through it
+would consume the incident's one announcement and silence the real outcome.
+
 ## The incident store
 
 Every terminal outcome is persisted:

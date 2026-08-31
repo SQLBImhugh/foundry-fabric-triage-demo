@@ -72,6 +72,7 @@ class TriageDeps:
     signature: str = ""
     known_incident: Any = None
     approval_gate: Any = None
+    approval_timeout_seconds: int = 300
 
 
 class TriageAgent:
@@ -134,6 +135,7 @@ class TriageAgent:
             workspace_id=deps.workspace_id or request.workspace_id or "",
             dataset_id=deps.dataset_id or request.dataset_id or "",
             approval_gate=deps.approval_gate,
+            approval_timeout_seconds=deps.approval_timeout_seconds,
         )
         dispatcher = ToolDispatcher(ctx, dq_agent=self._dq_agent)
 

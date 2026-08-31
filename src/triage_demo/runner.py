@@ -405,6 +405,7 @@ class TriageRunner:
             signature=signature,
             known_incident=known,
             approval_gate=self.build_approval_gate(scenario),
+            approval_timeout_seconds=int(self.settings.approval_timeout_seconds),
         )
 
         flags_before = self.flag_table.row_count

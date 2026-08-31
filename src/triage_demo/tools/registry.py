@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from triage_demo.approvals import ApprovalGate, ApprovalRequest
+from triage_demo.approvals import DEFAULT_TIMEOUT_SECONDS, ApprovalGate, ApprovalRequest
 from triage_demo.knowledge.refresh_history import assess_deactivation_risk
 from triage_demo.models import ApprovalRecord, BIRequest, DataQualityFinding, TriageAction
 from triage_demo.observability import tool_span
@@ -298,6 +298,11 @@ class ToolContext:
     workspace_id: str = ""
     dataset_id: str = ""
     approval_gate: ApprovalGate | None = None
+    # How long a gated action waits for an answer. Carried on the context
+    # because the dispatcher has no settings object, and hardcoding it here
+    # would make APPROVAL_TIMEOUT_SECONDS a knob that silently does nothing --
+    # which is the failure `TriagePolicy.from_settings` exists to prevent.
+    approval_timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     approvals: list[ApprovalRecord] = field(default_factory=list)
     gateway_rebound_to: str = ""
     deactivation_risk: Any = None
@@ -434,6 +439,7 @@ class ToolDispatcher:
             report_name=ctx.request.report_name or "",
             signature=ctx.signature,
             impact=_impact_of(name, arguments),
+            timeout_seconds=ctx.approval_timeout_seconds,
         )
 
         if gate is None:
@@ -484,6 +490,7 @@ class ToolDispatcher:
             waited_ms=waited_ms,
         )
         ctx.approvals.append(record)
+        await self._acknowledge_decision(request, record)
 
         if valid:
             logger.info("Approval granted for %s by %s", name, decision.decided_by or "unknown")
@@ -503,6 +510,58 @@ class ToolDispatcher:
                 "outcome 'approval_denied'."
             ),
         }
+
+    async def _acknowledge_decision(
+        self, request: ApprovalRequest, record: ApprovalRecord
+    ) -> None:
+        """Post who answered, because the card itself cannot show it.
+
+        The approval card's buttons are ``Action.OpenUrl`` links -- a link
+        cannot alter the card it sits on, and an incoming webhook cannot edit a
+        message it already posted. So the original card keeps its buttons
+        forever, and a channel reading back over an outage has no record of who
+        authorised what. A second click is refused, but nothing on screen says
+        so.
+
+        This is that record. It is posted straight to the notifier rather than
+        through the ``notify_teams`` tool on purpose: that path is deduplicated
+        against the incident's notified_count, and routing an approval
+        acknowledgement through it would consume the incident's one
+        announcement and silence the actual outcome. For the same reason it
+        must not touch ctx.notification_* -- those drive both the "was the
+        human told" check and the dedup, and an acknowledgement is neither.
+        """
+        ctx = self.ctx
+        granted = record.granted
+        summary = ResolutionSummary(
+            title=("Approval granted" if granted else "Approval not granted"),
+            report_name=ctx.request.report_name or "",
+            error=request.justification,
+            action_taken=request.action,
+            outcome=record.outcome,
+            timestamp=record.decided_at,
+            detail=(
+                record.reason
+                or ("The agent may now perform this one action." if granted else "")
+            ),
+            facts={
+                "Decided by": record.decided_by or "nobody",
+                "Request": request.request_id,
+                "Note": (
+                    "The buttons on the original card stay visible; a second "
+                    "click is refused."
+                ),
+            },
+        )
+
+        try:
+            await ctx.teams.post(summary)
+        except Exception as exc:  # noqa: BLE001
+            # A missing acknowledgement is cosmetic. Failing the run over it
+            # would turn a Teams outage into a refused remediation.
+            logger.warning(
+                "Could not acknowledge the approval decision (%s)", type(exc).__name__
+            )
 
     # --- individual tools --------------------------------------------------
 

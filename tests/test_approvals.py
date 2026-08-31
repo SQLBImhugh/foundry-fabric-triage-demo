@@ -277,6 +277,112 @@ def rebind_then_report(outcome: str) -> CannedProvider:
     )
 
 
+async def test_the_channel_gets_told_who_answered(
+    sample_request, tmp_path, clean_datasets
+) -> None:
+    """The card cannot show it, so something else has to.
+
+    Action.OpenUrl buttons cannot alter the card they sit on, and an incoming
+    webhook cannot edit a message it already posted -- so the approval card
+    keeps its buttons forever and shows no sign of having been answered.
+    Without this post, a channel read back after an outage has no record of who
+    authorised what.
+    """
+    from triage_demo.approvals import AutoApproveGate
+
+    deps = deps_with(AutoApproveGate(approver="priya"), tmp_path, clean_datasets)
+    await agent(rebind_then_report("resolved")).run(sample_request, deps)
+
+    acks = [m for m in deps.teams.messages if m.title.startswith("Approval")]
+    assert acks, "nothing told the channel the approval was answered"
+    assert acks[0].facts["Decided by"] == "priya"
+    assert acks[0].action_taken == REBIND
+
+
+async def test_a_decline_is_announced_too(
+    sample_request, tmp_path, clean_datasets
+) -> None:
+    from triage_demo.approvals import AutoDenyGate
+
+    deps = deps_with(
+        AutoDenyGate(approver="sam", reason="month end"), tmp_path, clean_datasets
+    )
+    await agent(rebind_then_report("approval_denied")).run(sample_request, deps)
+
+    acks = [m for m in deps.teams.messages if m.title.startswith("Approval")]
+    assert acks and acks[0].title == "Approval not granted"
+    assert "month end" in acks[0].detail
+
+
+async def test_the_acknowledgement_does_not_spend_the_incident_announcement(
+    sample_request, tmp_path, clean_datasets
+) -> None:
+    """The trap this walks past.
+
+    Teams delivery is deduplicated per incident: once an incident has been
+    announced, the controller declines to post about it again. Routing the
+    approval acknowledgement through ``notify_teams`` -- or letting it set
+    ``notification_delivered`` -- would consume that one announcement and
+    silence the actual outcome, so the human would be told a decision was
+    recorded and never told what happened next.
+    """
+    from triage_demo.approvals import AutoApproveGate
+
+    deps = deps_with(AutoApproveGate(approver="priya"), tmp_path, clean_datasets)
+    result = await agent(rebind_then_report("resolved")).run(sample_request, deps)
+
+    assert not result.notification_delivered, (
+        "the acknowledgement set the notification flags, which would suppress "
+        "the real outcome card for this incident"
+    )
+    assert not result.notification_suppressed
+    assert not result.notification_failed, (
+        "an acknowledgement must not look like an attempted-but-undelivered "
+        "resolution summary"
+    )
+
+
+async def test_the_approval_timeout_setting_is_actually_used(
+    sample_request, tmp_path, clean_datasets
+) -> None:
+    """A knob that does nothing is worse than no knob.
+
+    ``APPROVAL_TIMEOUT_SECONDS`` was defined in settings and documented in the
+    run sheet while ``_seek_approval`` used a hardcoded constant, so raising it
+    for a demo would have changed nothing and the card would still have expired
+    mid-sentence. Same failure ``TriagePolicy.from_settings`` exists to prevent.
+    """
+    from triage_demo.tools.registry import ToolContext, ToolDispatcher
+
+    seen: list[int] = []
+
+    class _Recording:
+        async def request_approval(self, request):
+            seen.append(request.timeout_seconds)
+            from triage_demo.approvals import ApprovalDecision
+
+            return ApprovalDecision(
+                granted=False, fingerprint=request.fingerprint, outcome="timed_out"
+            )
+
+    ctx = ToolContext(
+        request=sample_request,
+        ledger=PolicyLedger(TriagePolicy()),
+        powerbi=MockPowerBIClient(latency_ms=0),
+        teams=MockTeamsNotifier(),
+        flag_table=DataQualityFlagTable(tmp_path / "flags.csv"),
+        datasets=clean_datasets,
+        signature="sigapproval00009",
+        approval_gate=_Recording(),
+        approval_timeout_seconds=1234,
+    )
+    await ToolDispatcher(ctx).dispatch(
+        REBIND, {"target_gateway": "gw", "justification": "j"}
+    )
+
+    assert seen == [1234], f"the configured timeout never reached the request: {seen}"
+
+
 async def test_denied_action_never_reaches_the_client(
     sample_request, tmp_path, clean_datasets
 ) -> None:

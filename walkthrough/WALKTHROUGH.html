@@ -1154,6 +1154,11 @@ footer a { color: var(--text-dim); }
     While the agent waits, the run's wall clock stops. Both limits default to
     300 seconds, so charging the agent for a person's reading time would kill
     the run as <code>timed_out</code> at the moment the approval was granted.
+    <br><br>
+    The card keeps its buttons after it is answered. A link cannot alter the
+    card it sits on, and a webhook cannot edit a message it already posted, so
+    the agent posts a separate note saying who decided &mdash; and a second
+    click is refused twice over, by the callback and again by the agent.
   </div>
 
   <div class="note">
