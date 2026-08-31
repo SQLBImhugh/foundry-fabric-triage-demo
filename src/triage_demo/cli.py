@@ -446,6 +446,9 @@ async def _watch_loop(
                      f"[dim]from {request.sender}[/dim]")
             )
             artifacts = await runner.run_request(request)
+            # Marked only once the outcome is recorded, so a crash re-triages
+            # rather than losing the alert.
+            inbox.mark_processed(request.request_id, received_at=request.received_at)
             _render_result(artifacts)
             triaged += 1
 

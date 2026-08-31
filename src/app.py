@@ -255,6 +255,10 @@ class TriageControllerAgent(BaseAgent):
         lines: list[str] = []
         for request in requests:
             artifacts = await self._runner.run_request(request)
+            # Only after the outcome is persisted. A crash before this point
+            # means the alert is triaged again next sweep, which is safe; a
+            # crash after marking would lose it silently.
+            inbox.mark_processed(request.request_id, received_at=request.received_at)
             lines.append(f"- {request.subject or '(no subject)'}: {_summarise(artifacts)}")
         return f"Triaged {len(requests)} alert(s).\n" + "\n".join(lines)
 

@@ -220,6 +220,13 @@ class TriageResult(BaseModel):
     # the outcome, but it must not be invisible.
     notification_failed: bool = False
 
+    # Whether a card actually went out, and whether the controller deliberately
+    # held it back because the incident had already been announced. Kept apart
+    # from ``notification_failed`` on purpose: one is a fault, the other is the
+    # deduplication working.
+    notification_delivered: bool = False
+    notification_suppressed: bool = False
+
     # Populated only on ``agent_crashed`` — so "why did it crash" is answerable
     # from the incident queue without grepping App Insights.
     exception_class: str = ""
@@ -260,6 +267,14 @@ class Incident(BaseModel):
     occurrence_count: int = 1
     first_seen_at: str = Field(default_factory=_utcnow)
     last_seen_at: str = Field(default_factory=_utcnow)
+
+    # How many times this incident has been announced to a channel. A recurring
+    # failure must not produce a card per occurrence: a five-minute sweep over
+    # an unresolved alert posted 12 identical cards an hour, which is precisely
+    # the alert fatigue this system exists to remove. The controller consults
+    # this before delivering, so the limit does not depend on prompt wording.
+    notified_count: int = 0
+    last_notified_at: str = ""
 
     # Redacted at the store boundary — never write these directly.
     original_error: str = ""

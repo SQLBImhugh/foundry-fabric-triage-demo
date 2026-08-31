@@ -936,7 +936,7 @@ footer a { color: var(--text-dim); }
   <h2><span class="num">3</span> Duplicate alert — suppressed</h2>
   <p class="lede">
     During an outage the same alert arrives repeatedly. This is the deduplication that stops the
-    system acting on each one.
+    system acting on each one, and announcing each one.
   </p>
 
   <div class="figure">
@@ -952,11 +952,18 @@ footer a { color: var(--text-dim); }
       </span></li>
       <li><span class="n c3">3</span><span class="txt">
         <b>It stops early.</b> Four tool calls instead of six. No second flag row, no second
-        remediation, and the notification says “already tracked” rather than reporting it as new.
+        remediation, and the notification says &ldquo;already tracked&rdquo; rather than reporting it as new.
       </span></li>
       <li><span class="n c4">4</span><span class="txt">
         <b>One incident, occurrence count 2.</b> Not two incidents. The queue a human reads stays
         readable during an outage, which is precisely when it matters.
+      </span></li>
+      <li><span class="n c5">5</span><span class="txt">
+        <b>It is announced once, not once per occurrence.</b> A third alert with the same signature
+        is counted on the incident and posts nothing. The controller checks the incident before
+        delivering, so this does not depend on the model choosing to stay quiet. Without it, a
+        five-minute sweep over an unresolved alert posts a card every five minutes &mdash; which is
+        the alert fatigue this is supposed to remove.
       </span></li>
     </ul>
   </div>

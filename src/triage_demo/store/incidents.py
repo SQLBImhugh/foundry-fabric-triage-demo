@@ -142,6 +142,7 @@ class InMemoryIncidentStore:
         model_name: str = "",
         app_version: str = "",
         source: str = "powerbi_refresh_failure",
+        notified: bool = False,
     ) -> Incident:
         """Upsert an incident for this result. Increments on repeat."""
         now = _utcnow()
@@ -156,11 +157,15 @@ class InMemoryIncidentStore:
                 if parent is not None:
                     parent.occurrence_count += 1
                     parent.last_seen_at = now
+                    if notified:
+                        parent.notified_count += 1
+                        parent.last_notified_at = now
                     self._persist(parent)
                     logger.info(
-                        "Incident %s suppressed duplicate -> occurrence %d",
+                        "Incident %s suppressed duplicate -> occurrence %d (notified %d)",
                         parent.id,
                         parent.occurrence_count,
+                        parent.notified_count,
                     )
                     return parent.model_copy(deep=True)
             logger.warning(
@@ -185,6 +190,9 @@ class InMemoryIncidentStore:
                 existing.occurrence_count += 1
                 existing.last_seen_at = now
                 existing.outcome = result.outcome
+                if notified:
+                    existing.notified_count += 1
+                    existing.last_notified_at = now
                 # Status must follow the outcome, or a since-resolved incident
                 # keeps suppressing under a stale 'open'.
                 existing.status = _status_for(result.outcome)  # type: ignore[assignment]
@@ -210,6 +218,8 @@ class InMemoryIncidentStore:
                 occurrence_count=1,
                 first_seen_at=now,
                 last_seen_at=now,
+                notified_count=1 if notified else 0,
+                last_notified_at=now if notified else "",
                 original_error=red_error,
                 diagnosed_root_cause=red_cause,
                 action_applied=red_action,

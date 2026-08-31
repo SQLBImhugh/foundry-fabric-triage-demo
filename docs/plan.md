@@ -401,6 +401,8 @@ are exactly the class of thing that separates a demo from a system.
 | Redaction missed Cosmos keys, Basic auth, camelCase JSON secrets, quoted SQL passwords, URL-encoded SAS | All realistic in Power BI / Azure error payloads |
 | `configure_telemetry` had no caller | Tracing was wired in the code and dead in the process |
 | Refused actions were invisible in the tool-call count | The refusal is the interesting part; it should not be the hidden part |
+| Already-triaged mail was tracked in a set on the inbox instance | A hosted agent is rebuilt per invocation, so the set was always empty and every scheduled sweep re-triaged the whole mailbox. Found in the tenant, not in review: two unread alerts and a five-minute routine produced ~24 Teams cards an hour and drove one incident to 130 occurrences |
+| Every suppressed duplicate still posted a card | Dedup stopped the remediation but not the notification, so a recurring failure produced exactly the alert fatigue the system claims to remove. The controller now announces an incident once and counts the rest |
 | Run sheet's own reset order destroyed the evidence it told you to show | Added `--keep-incidents` |
 
 ### Documentation corrections

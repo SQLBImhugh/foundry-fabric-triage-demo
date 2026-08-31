@@ -26,6 +26,7 @@ from triage_demo.policy import TriagePolicy
 from triage_demo.providers import get_provider
 from triage_demo.signature import compute_signature
 from triage_demo.store.incidents import IncidentStore, JsonFileIncidentStore
+from triage_demo.store.processed import JsonFileProcessedLog
 from triage_demo.tools.dataset import DatasetSource
 from triage_demo.tools.flags import DataQualityFlagTable
 from triage_demo.tools.inbox import GraphInbox, MockInbox
@@ -164,6 +165,31 @@ class TriageRunner:
             )
         return store
 
+    def build_processed_log(self):
+        """Where the record of already-triaged mail lives.
+
+        Mirrors ``_build_store``: the table when one is configured, a JSON file
+        otherwise, so the offline path needs no Azure dependency. This has to
+        outlive the process -- a hosted agent is rebuilt for every invocation,
+        so anything held in memory here is always empty on arrival.
+        """
+        endpoint = self.settings.incident_table_endpoint
+        if not endpoint:
+            return JsonFileProcessedLog(self.base_dir / "runs" / "processed.json")
+
+        from triage_demo.store.processed import AzureTableProcessedLog
+
+        log = AzureTableProcessedLog(
+            endpoint=endpoint, table_name=self.settings.processed_table_name
+        )
+        if not log.is_durable:
+            logger.error(
+                "Processed-message log at %s is not durable; scheduled sweeps will "
+                "re-triage the same mail and notify repeatedly",
+                endpoint,
+            )
+        return log
+
     def build_inbox(self):
         if self.settings.triage_tool_mode == "live" and self.settings.graph_tenant_id:
             from triage_demo.tools.mail_filter import MailFilter
@@ -179,6 +205,7 @@ class TriageRunner:
                     senders=self.settings.graph_sender_allowlist,
                     subject_pattern=self.settings.graph_subject_pattern,
                 ),
+                processed_log=self.build_processed_log(),
             )
         return MockInbox(directory=self.base_dir / "mock" / "emails")
 
@@ -353,6 +380,9 @@ class TriageRunner:
             model_provider=agent.provider_name,
             model_name=agent.model_name,
             app_version=self.settings.app_version,
+            # Only a card that actually went out counts. Passing "attempted"
+            # here would let one failed delivery silence every future one.
+            notified=result.notification_delivered,
         )
 
         return RunArtifacts(

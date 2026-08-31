@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     # the agent remediate the same failure twice after a restart.
     incident_table_endpoint: str = ""
     incident_table_name: str = "incidents"
+    # Which alert mail has already been triaged. Shares the incident table's
+    # endpoint because it shares its lifetime: both must outlive a hosted
+    # agent invocation or a scheduled sweep re-triages everything it sees.
+    processed_table_name: str = "processedmessages"
     # Set once an Exchange ApplicationAccessPolicy scopes the app registration
     # to `graph_mailbox`. Preflight warns loudly while this is False, because an
     # unscoped app-only Mail.Read grant can read EVERY mailbox in the tenant.

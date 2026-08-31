@@ -70,6 +70,11 @@ azd ai agent monitor bi-triage-controller
 13. **The walkthrough pages stay self-contained.** The SharePoint/Teams preview
     drops external CSS and images without reporting it. After changing a
     screenshot or the stylesheet, run `scripts/inline_assets.py`.
+14. **State that must survive an invocation goes in a store, never on an
+    object.** A hosted agent is rebuilt for every request, so an instance
+    attribute is always empty on arrival.
+15. **An incident is announced once, not once per occurrence.** Enforced in the
+    controller against `notified_count`, never in prompt wording.
 
 ## Style
 

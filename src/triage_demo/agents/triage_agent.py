@@ -284,7 +284,15 @@ class TriageAgent:
             summary = str(reported.get("summary") or "")
             outcome, summary = self._validate_outcome(outcome, summary, ctx, ledger)
 
-        notification_failed = ctx.notification_attempted and not ctx.notification_delivered
+        # A suppressed notification is a decision, not a delivery failure.
+        # Without this distinction the run would warn, emit a failure event and
+        # append "WARNING: not delivered" to the summary every time dedup did
+        # exactly what it is supposed to do.
+        notification_failed = (
+            ctx.notification_attempted
+            and not ctx.notification_delivered
+            and not ctx.notification_suppressed
+        )
         if notification_failed:
             logger.warning("Notification was attempted but not delivered")
             self._emit("notification_failed", {})
@@ -310,6 +318,8 @@ class TriageAgent:
             blocked_attempts=list(ledger.blocked_attempts),
             denied_actions=list(ledger.denied_actions),
             notification_failed=notification_failed,
+            notification_delivered=ctx.notification_delivered,
+            notification_suppressed=ctx.notification_suppressed,
             exception_class=exception_class,
             exception_message=exception_message,
             started_at=started_at,

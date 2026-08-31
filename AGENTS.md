@@ -81,6 +81,15 @@ azd ai agent monitor bi-triage-controller
     that drops external stylesheets and images *without reporting it* — the
     page simply arrives unstyled with empty figures. After recapturing a
     screenshot or editing `walkthrough.css`, run `scripts/inline_assets.py`.
+16. **State that must survive an invocation goes in a store, never on an
+    object.** A hosted agent is constructed fresh for every request, so an
+    instance attribute is always empty on arrival. Tracking already-triaged
+    mail in a set on the inbox meant every scheduled sweep re-triaged the whole
+    mailbox and posted a card each time.
+17. **An incident is announced once, not once per occurrence.** Deduplication
+    that stops the remediation but not the notification produces exactly the
+    alert fatigue this demo exists to remove. Enforced in the controller
+    against `notified_count`, never in prompt wording.
 
 ## Adding things
 

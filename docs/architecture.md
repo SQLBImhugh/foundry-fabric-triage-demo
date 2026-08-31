@@ -157,6 +157,23 @@ information and must be allowed to trigger action again.
 row — that would produce one incident per alert, which is the state the signature
 exists to prevent.
 
+**An incident is announced once, not once per occurrence.** The controller
+checks `notified_count` on the matching open incident before delivering a Teams
+card and declines if it is already above zero. The tool call is still recorded,
+so the audit trail shows the agent asked and the controller refused.
+
+This is enforced in `ToolDispatcher._execute`, not in the prompt, for the usual
+reason: a limit that exists only as prompt wording is not a limit. It was added
+after a five-minute routine over two unread alerts posted roughly 24 identical
+cards an hour into a real channel — dedup was stopping the *remediation* but not
+the *notification*, which is the alert fatigue this system exists to remove.
+
+**Already-triaged mail is tracked in the agent's own store**, in
+`store/processed.py`, keyed by a hash of the Graph message id. It cannot be
+tracked in the mailbox: the agent holds `Mail.Read` and deliberately cannot mark
+a message read or move it. A message is marked only *after* its outcome is
+persisted, so a crash mid-run re-triages rather than dropping the alert.
+
 ## The incident store
 
 Every terminal outcome is persisted:

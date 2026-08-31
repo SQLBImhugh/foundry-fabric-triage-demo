@@ -291,6 +291,9 @@ class ToolContext:
     flag_written: bool = False
     notification_attempted: bool = False
     notification_delivered: bool = False
+    # Set when the controller declined to deliver because the incident had
+    # already been announced. Distinct from a delivery failure.
+    notification_suppressed: bool = False
 
     workspace_id: str = ""
     dataset_id: str = ""
@@ -633,6 +636,41 @@ class ToolDispatcher:
             )
             ctx.notifications.append(summary)
             ctx.notification_attempted = True
+
+            # Announce an incident once, not once per occurrence. A known open
+            # incident that has already been announced is, by definition, one
+            # somebody has been told about; re-posting an identical card every
+            # sweep is the alert fatigue this system exists to remove. Observed
+            # in the demo tenant: a five-minute routine over two unread alerts
+            # posted 24 identical cards an hour.
+            #
+            # Decided here rather than in the prompt on purpose. A limit that
+            # exists only as prompt wording is not a limit -- the model can
+            # always be argued out of it, and a stale conversation would
+            # reintroduce the flood. The tool call is still recorded, so the
+            # audit trail shows the agent chose to notify and the controller
+            # declined to deliver.
+            known = ctx.known_incident
+            if known is not None and known.notified_count > 0:
+                ctx.notification_suppressed = True
+                ctx.notification_delivered = False
+                logger.info(
+                    "Notification suppressed: incident %s already announced %d time(s), "
+                    "now at occurrence %d",
+                    known.id,
+                    known.notified_count,
+                    known.occurrence_count,
+                )
+                return {
+                    "delivered": False,
+                    "suppressed": True,
+                    "reason": (
+                        f"Incident {known.id} has already been announced. This "
+                        f"occurrence ({known.occurrence_count + 1}) was counted on the "
+                        "existing incident instead of posting another card."
+                    ),
+                }
+
             delivery = await ctx.teams.post(summary)
             ctx.notification_delivered = bool(
                 delivery.get("delivered") if isinstance(delivery, dict) else False

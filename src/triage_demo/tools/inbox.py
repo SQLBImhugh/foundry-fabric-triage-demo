@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from triage_demo.models import BIRequest
+from triage_demo.store.processed import InMemoryProcessedLog, ProcessedMessageLog
 from triage_demo.tools.mail_filter import MailFilter
 
 logger = logging.getLogger("triage.inbox")
@@ -91,6 +92,7 @@ def parse_hints(subject: str, body: str) -> dict[str, str | None]:
 
 class InboxSource(Protocol):
     async def fetch(self, limit: int = 10) -> list[BIRequest]: ...
+    def mark_processed(self, message_id: str, *, received_at: str = "") -> None: ...
 
 
 @dataclass
@@ -99,6 +101,9 @@ class MockInbox:
 
     directory: Path
     consumed: list[str] = field(default_factory=list)
+
+    def mark_processed(self, message_id: str, *, received_at: str = "") -> None:
+        """No-op: the offline path replays its fixtures on purpose."""
 
     async def fetch(self, limit: int = 10) -> list[BIRequest]:
         directory = Path(self.directory)
@@ -143,8 +148,9 @@ class GraphInbox:
     """Polls a monitored mailbox via Microsoft Graph.
 
     Uses an admin-consented application permission (``Mail.Read``). Marks
-    nothing as read — the demo re-runs must be repeatable — so dedup is by
-    message id held in memory.
+    nothing as read — the agent cannot write to the mailbox at all, which is
+    deliberate — so "already handled" is tracked in the agent's own durable
+    log instead. See ``store/processed.py`` for why that has to be durable.
     """
 
     _BASE = "https://graph.microsoft.com/v1.0"
@@ -158,18 +164,30 @@ class GraphInbox:
         client_secret: str | None = None,
         mailbox: str,
         mail_filter: MailFilter | None = None,
+        processed_log: ProcessedMessageLog | None = None,
     ):
         self._tenant_id = tenant_id
         self._client_id = client_id
         self._client_secret = client_secret or ""
         self._mailbox = mailbox
-        self._seen: set[str] = set()
+        # In-memory by default so a caller that forgets to supply one behaves
+        # as this class did before, rather than silently re-triaging.
+        self._processed: ProcessedMessageLog = processed_log or InMemoryProcessedLog()
         self._token: str = ""
         self._token_expires_at: float = 0.0
         # Fail closed: without an explicit filter the agent would act on
         # every message in the mailbox, which makes it steerable by anyone
         # who can send it mail.
         self._filter = mail_filter
+
+    def mark_processed(self, message_id: str, *, received_at: str = "") -> None:
+        """Record that this message reached a terminal outcome.
+
+        Called by the caller *after* the incident is persisted, not during
+        ``fetch``. If the run dies in between, the alert is triaged again next
+        sweep -- noisy but safe -- rather than being dropped unseen.
+        """
+        self._processed.mark(message_id, received_at=received_at)
 
     async def _get_token(self) -> str:
         if self._token and time.time() < self._token_expires_at - 60:
@@ -265,11 +283,14 @@ class GraphInbox:
 
         out: list[BIRequest] = []
         skipped = 0
+        already = 0
         for msg in messages:
             mid = msg.get("id", "")
-            if mid in self._seen:
+            if self._processed.seen(mid):
+                # Already triaged on an earlier sweep. Counted so an operator
+                # can tell "nothing new" apart from "not looking".
+                already += 1
                 continue
-            self._seen.add(mid)
 
             subject = msg.get("subject", "") or ""
             sender = ((msg.get("from") or {}).get("emailAddress") or {}).get("address", "")
@@ -303,6 +324,8 @@ class GraphInbox:
             logger.info(
                 "Ignored %d message(s) that were not Power BI refresh alerts", skipped
             )
+        if already:
+            logger.info("Skipped %d message(s) already triaged on an earlier sweep", already)
         return out
 
     @staticmethod
