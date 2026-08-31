@@ -1,8 +1,12 @@
 # Build plan — BI Request Triage & Resolution demo
 
-**Status**: Deployed, rehearsed and ready. Running unattended in Azure. The controller runs as a
-Foundry hosted agent with its own Entra agent identity, woken by a Foundry
-routine, reading a real mailbox and acting on a real Power BI dataset.
+**Status**: Deployed and rehearsed. The controller runs as a
+Foundry hosted agent with its own Entra agent identity, reading a real mailbox
+and acting on a real Power BI dataset. Live email ingestion is proven end to
+end. The Foundry routine that should trigger it on a schedule is registered and
+enabled but does not fire — a preview defect, documented in
+`docs/hosted-architecture.md`; any external scheduler calling the agent endpoint
+gives unattended operation today.
 287 tests green and still fully offline; the mock path remains the rehearsal
 fallback. See `docs/hosted-architecture.md` for what each identity can actually
 reach — including the things that only surfaced by trying them.
@@ -195,11 +199,24 @@ the story.
 | Deliverable | Where |
 |---|---|
 | Controller as a Foundry hosted agent | `src/app.py`, `azure.yaml` |
-| Scheduled trigger | Foundry routine, `bi-triage-schedule` |
+| Scheduled trigger | Foundry routine, `bi-triage-schedule` — **registered, does not fire** |
 | Durable incident store | `src/triage_demo/store/azure_table.py` |
 | Inbox relevance filter | `src/triage_demo/tools/mail_filter.py` |
 | Agent identity inspection | `src/triage_demo/identity.py`, `triage-demo identity` |
 | Model chosen by measurement | `scripts/compare_models.py`, `docs/model-selection.md` |
+
+**The routine does not work, and that is a platform issue rather than a
+configuration one.** It is registered with a five-minute cron, the API reports
+`enabled: true`, and `azd ai routine dispatch` returns dispatch and task ids.
+It has never invoked the agent: zero entries in `routine run list` over three
+days, and after a dispatch the container logs nothing at all. `azd ai routine
+list` also returns `null` for a routine that `routine show` returns in full,
+which suggests the preview's registration and execution paths disagree about
+what exists.
+
+Nothing downstream depends on it. The scheduled path and the interactive path
+are the same code, so any external scheduler that can call the agent endpoint
+gives unattended operation today. Worth re-testing when routines leave preview.
 
 What the tenant actually does, verified rather than assumed:
 
@@ -250,12 +267,17 @@ actions, and scenario 4 went to **6/6**.
 
 Outstanding, and honestly small:
 
-- [ ] A genuine Power BI alert email delivered to the monitored mailbox. The
-      allowlist now accepts the presenter's address so this can be done live;
-      it needs someone to press send, which is a demo-day action anyway.
-- [ ] Inbox-to-first-action latency measured on the day —
-      `python scripts/measure_latency.py` reports it, but it needs a real
-      message in the mailbox to measure.
+- [x] A genuine Power BI alert delivered to the monitored mailbox and found by
+      the agent unaided. Proven: the filter ignored 9 unrelated messages, found
+      the one real alert, matched two playbooks and recorded the incident.
+- [x] Inbox-to-first-action measured. **~47 s** from the agent starting a sweep
+      to a recorded outcome, with first response at ~11 s. Add the trigger
+      interval to that for the real end-to-end number — which currently means
+      whatever external scheduler you use, since the Foundry routine does not
+      fire.
+- [ ] Teams delivery. The webhook is still unset (`TEAMS_WEBHOOK_URL=""`), so
+      notifications remain mocked. Two minutes from the channel; the run sheet
+      has the steps.
 
 ---
 

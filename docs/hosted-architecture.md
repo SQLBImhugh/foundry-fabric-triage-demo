@@ -8,8 +8,8 @@ observed, it says so.
 ## The shape
 
 ```
-Foundry routine  (bi-triage-schedule, cron)
-        |
+Foundry routine  (bi-triage-schedule, cron)   <- registered, enabled, DOES NOT FIRE
+        |                                        (preview defect; see below)
         v
 Hosted agent: bi-triage-controller          <- container, Python, its own agent identity
         |
@@ -178,7 +178,13 @@ explicit sentinel, and only the most recent inbound message is read.
   content. Do not "fix" it — verified by measuring the line rather than reading
   it.
 - **`azd ai routine list` may report "No routines found"** for a routine that
-  exists and dispatches successfully. Preview inconsistency; trust `dispatch`.
+  exists and dispatches successfully. That inconsistency turned out to be a
+  symptom, not a cosmetic bug: **the routine never fires.** Registered with a
+  five-minute cron, `enabled: true`, dispatch returns ids — and zero runs over
+  three days, with no container activity after a dispatch. Treat scheduled
+  triggering as unavailable in preview and drive the agent from a scheduler you
+  already trust. Nothing else depends on it, because the scheduled and
+  interactive paths are the same code.
 
 ## Reproducing it
 

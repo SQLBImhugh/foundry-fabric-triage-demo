@@ -358,11 +358,22 @@
 
 <!-- ══════════════════════════════════════════════════════════════════ -->
 <section id="hosted">
-  <h2><span class="num">E</span> It runs in Azure, on a schedule, with nobody watching</h2>
+  <h2><span class="num">E</span> It runs in Azure, invoked on a schedule</h2>
   <p class="lede">
     Everything above runs as a deployed Foundry <b>hosted agent</b> — a container in your
-    subscription — woken on a schedule by a Foundry <b>routine</b>. No laptop is involved. This is
-    the difference between a demonstration and something you could actually operate.
+    subscription — with no laptop involved. This is the difference between a demonstration and
+    something you could actually operate.
+  </p>
+
+  <p class="note">
+    <b>One caveat on the trigger, tested rather than assumed.</b> A Foundry <b>routine</b> is
+    registered against this agent with a five-minute schedule, and the platform reports it as
+    <code>enabled</code> and accepts manual dispatches. It has never actually invoked the agent —
+    zero runs recorded over three days, and a dispatch returns an id while the container does
+    nothing. Routines are in preview and this looks like a preview defect rather than a
+    misconfiguration. Until it fires, anything needing a timer should call the agent's endpoint
+    from a scheduler you already trust; the agent itself is unchanged either way, because the
+    scheduled path and the interactive path are the same code.
   </p>
 
   <div class="figure">
