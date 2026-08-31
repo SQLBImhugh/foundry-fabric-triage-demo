@@ -70,11 +70,19 @@ def test_benign_mentions_are_not_flagged(text: str) -> None:
 
 def test_workflows_webhook_url_is_treated_as_a_credential() -> None:
     """The URL *is* the credential -- anyone holding it can post to the channel."""
-    url = (
+    old_format = (
         "https://prod-12.westus.logic.azure.com/workflows/abc/triggers/"
         "manual/paths/invoke?sig=FAKEsigVALUE123"
     )
-    assert build_handoff.WEBHOOK_URL.search(url)
+    # The format actually issued by Teams today. A scanner that only knew the
+    # logic.azure.com form would have let this straight through.
+    new_format = (
+        "https://defaultedf144.f9.environment.api.powerplatform.com:443/powerautomate/"
+        "automations/direct/cu/07/workflows/abc/triggers/manual/paths/invoke"
+        "?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=FAKEsigVALUE123"
+    )
+    assert build_handoff.WEBHOOK_URL.search(old_format)
+    assert build_handoff.WEBHOOK_URL.search(new_format)
 
 
 def test_bearer_tokens_are_detected() -> None:

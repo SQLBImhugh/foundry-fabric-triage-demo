@@ -730,36 +730,43 @@
 
   <div class="figure">
     <div class="cap-top">
-      <span class="where">rendered from the live payload</span> triage-demo teams-preview
+      <span class="where">live &middot; Teams, demo tenant</span> posted by the deployed agent
     </div>
-    <div class="shot"><img src="shots/shot-teams-card.svg" alt="The Adaptive Card the agent posts to Teams"></div>
+    <div class="shot"><img src="shots/shot-teams-live.png" alt="The Adaptive Card the agent posted to the Teams channel"></div>
     <ul class="callouts">
       <li><span class="n c1">1</span><span class="txt">
-        <b>This is generated from the card the agent actually produces</b>, not drawn for the
-        document, so it cannot drift from what would really be posted. Run
-        <code>triage-demo teams-preview --json</code> to get the exact payload.
+        <b>This card was posted by the agent, not staged.</b> It arrived in the channel over a Power
+        Automate Workflows webhook, from the container running in Azure, at the end of a real run.
       </span></li>
       <li><span class="n c2">2</span><span class="txt">
-        <b>It carries the evidence, not just the verdict.</b> Report, error, action taken, outcome,
-        timestamp and the incident signature — enough for whoever picks it up to decide whether they
-        agree, without opening a console.
+        <b>It carries the evidence, not just the verdict.</b> Report, error, action taken, outcome
+        and the incident signature — enough for whoever picks it up to decide whether they agree,
+        without opening a console.
       </span></li>
       <li><span class="n c3">3</span><span class="txt">
+        <b>The reasoning is in the card.</b> "Refresh history contained only two prior API failures
+        (no scheduled runs), so schedule deactivation is not at risk." That distinction between
+        API-triggered and scheduled failures is the difference between a correct answer and a
+        plausible one, and it is stated where a human can check it.
+      </span></li>
+      <li><span class="n c4">4</span><span class="txt">
+        <b>It says what it did <em>not</em> do.</b> "No further automated retry was attempted" —
+        the agent stopped, and said so, rather than leaving the reader to infer it.
+      </span></li>
+      <li><span class="n c5">5</span><span class="txt">
         <b>Redaction happens before this leaves the process.</b> The card is built from redacted
-        text, so a connection string in an error message never reaches a channel that a wider
-        audience can read than the system it came from.
+        text, so a connection string in an error message never reaches a channel with a wider
+        audience than the system it came from.
       </span></li>
     </ul>
   </div>
 
   <p class="note">
-    <b>Being straight about delivery.</b> In this build the notifier is mocked, so no card has been
-    posted to a real channel. Microsoft retired Office 365 “Incoming Webhook” connectors on
-    <b>22 May 2026</b>, and the replacement — a Power Automate <i>Workflows</i> webhook — has to be
-    created by hand from the channel; there is no application-permission path for posting to a
-    channel. Wiring it is a two-minute step, documented in the run sheet, and everything above is
-    what will arrive when it is. Posts appear as the Workflows bot rather than a custom name or
-    icon, which is a limitation of the replacement worth knowing before a customer sees it.
+    <b>Two cosmetic notes, so nobody is surprised on the day.</b> The post shows as a Workflows bot
+    rather than a custom name or icon — a limitation of the replacement for the retired Office 365
+    connectors, which Microsoft removed on 22 May 2026. The sender line also renders an unresolved
+    Workflows placeholder rather than a display name. Both are properties of the delivery mechanism,
+    not of the agent, and neither affects the content.
   </p>
 </section>
 

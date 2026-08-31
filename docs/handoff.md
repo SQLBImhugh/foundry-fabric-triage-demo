@@ -44,7 +44,8 @@ enough to read. The parts that would need real work before production are listed
 in `docs/plan.md` under "Production-grade equivalent", and that list is not a
 formality — policy, dedup and incident storage all need to grow considerably.
 
-**Teams delivery is not wired.** The notifier is mocked; the card is real but
-has never been posted. Office 365 connector webhooks were retired on
-22 May 2026 and the replacement has to be created by hand. The run sheet has the
-two-minute procedure.
+**Teams delivery is wired.** The agent posts a real Adaptive Card to
+**Data Platform Operations → BI Alerts** over a Power Automate Workflows
+webhook. Do **not** put `TEAMS_WEBHOOK_URL` in the bundle — the URL is a bearer
+credential and anyone holding it can post to that channel. The recipient
+creates their own.

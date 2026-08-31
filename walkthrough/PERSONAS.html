@@ -167,26 +167,25 @@
   </div>
 
   <div class="figure">
-    <div class="cap-top"><span class="where">rendered from the live payload</span> what lands in Sam's channel</div>
-    <div class="shot"><img src="shots/shot-teams-card.svg" alt="The notification card the agent posts"></div>
+    <div class="cap-top"><span class="where">live &middot; Teams, demo tenant</span> what lands in Sam's channel</div>
+    <div class="shot"><img src="shots/shot-teams-live.png" alt="The notification card the agent posted"></div>
     <ul class="callouts">
       <li><span class="n c1">1</span><span class="txt">
         <b>Everything needed to agree or disagree, in one card.</b> Sam does not have to open a
-        console to form a view.
+        console to form a view — and this is the real post, made by the agent at the end of a real
+        run, not a mock-up.
       </span></li>
       <li><span class="n c2">2</span><span class="txt">
+        <b>It says what it did not do, and why.</b> "No further automated retry was attempted"
+        because a credentials failure cannot be fixed by refreshing. Sam is told where the boundary
+        was, not just where the agent stopped.
+      </span></li>
+      <li><span class="n c3">3</span><span class="txt">
         <b>Secrets are stripped before this leaves the process.</b> A connection string in an error
         message never reaches a channel with a wider audience than the system it came from.
       </span></li>
     </ul>
   </div>
-
-  <p class="note">
-    <b>Being straight about this one.</b> The card above is generated from the payload the agent
-    really produces, but delivery to a channel is not wired in this build — Microsoft retired the old
-    Teams webhook connectors on 22 May 2026 and the replacement has to be created by hand. It is a
-    two-minute step, documented in the run sheet. Nothing else on this page is pending.
-  </p>
 </section>
 
 <!-- ══════════════════════════════════════════════════════════════════ -->

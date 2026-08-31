@@ -129,7 +129,7 @@ should not.
 
 ---
 
-### Phase 3 — Wire the live tools ✅ COMPLETE (Teams and flag table deliberately still mock)
+### Phase 3 — Wire the live tools ✅ COMPLETE (flag table deliberately still CSV)
 
 1. **Inbox** — `GraphInbox`, live. Gained a **relevance filter** that was not in
    the original plan and turned out to be a security control rather than
@@ -141,9 +141,12 @@ should not.
    rather than a passing one was the right one: the failure is
    `ModelRefreshFailed_CredentialsNotSpecified`, which is unrecoverable by
    retry, and the agent correctly declines to retry and escalates instead.
-3. **Teams** — still the mock notifier. Office 365 connector webhooks were
-   retired on 22 May 2026; the replacement is a Power Automate Workflows
-   webhook, and there is no app-only path for posting to a channel.
+3. **Teams** — live. The agent posts an Adaptive Card to **Data Platform
+   Operations → BI Alerts** over a Power Automate Workflows webhook. Office 365
+   connector webhooks were retired on 22 May 2026 and there is no
+   application-permission path for posting to a channel, so the webhook has to
+   be created by hand from the channel — the one manual step in the whole
+   deployment. Posts appear as the Workflows bot rather than a custom name.
 4. **Flag table** — still CSV, deliberately. A CSV opened in Excel is easier to
    show on screen than a Lakehouse query, and the before/after is a required
    demo beat.
@@ -275,9 +278,10 @@ Outstanding, and honestly small:
       interval to that for the real end-to-end number — which currently means
       whatever external scheduler you use, since the Foundry routine does not
       fire.
-- [ ] Teams delivery. The webhook is still unset (`TEAMS_WEBHOOK_URL=""`), so
-      notifications remain mocked. Two minutes from the channel; the run sheet
-      has the steps.
+- [x] Teams delivery. Wired and verified: the agent posts a real Adaptive Card
+      to **Data Platform Operations → BI Alerts** over a Power Automate
+      Workflows webhook. The walkthroughs now show the real post rather than a
+      rendering.
 
 ---
 
@@ -288,10 +292,11 @@ Run sheet: [`run-sheet.md`](run-sheet.md). Question prep: [`faq.md`](faq.md).
 Open with `triage-demo identity --check-scope` if anyone from security or
 identity is in the room; it reframes everything that follows.
 
-**Teams is mocked unless wired.** `TEAMS_WEBHOOK_URL` is empty by default. Either
-create the Workflows webhook before the session (two minutes, run sheet has the
-steps) or use `triage-demo teams-preview` and say plainly that delivery is not
-wired. Do not imply it is.
+**Teams is wired — confirm it still delivers.** The agent posts to
+**Data Platform Operations → BI Alerts**. A webhook can be deleted or its flow
+disabled without anything else changing, so run one scenario before the session
+rather than assuming. If it has stopped, recreate it from the channel and
+`python scripts\setup_teams_webhook.py --set-url "<url>"`.
 
 ---
 

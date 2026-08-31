@@ -55,8 +55,14 @@ SECRET_ASSIGNMENT = re.compile(
     (?P<value> [^\s"'<>${},]{12,} )      # 12+ chars, not a placeholder
     """,
 )
-# A Workflows webhook URL is itself the credential.
-WEBHOOK_URL = re.compile(r"https://[^\s\"']*logic\.azure\.com[^\s\"']*sig=[^\s\"'&]+", re.I)
+# A Workflows webhook URL is itself the credential. Two formats in the wild:
+# the older logic.azure.com one, and the newer Power Platform environment host.
+# The new format carries the same 'sig' bearer parameter and would have sailed
+# past a check that only knew about the old one.
+WEBHOOK_URL = re.compile(
+    r"https://[^\s\"']*(?:logic\.azure\.com|powerplatform\.com)[^\s\"']*sig=[^\s\"'&]+",
+    re.I,
+)
 BEARER_TOKEN = re.compile(r"\bBearer\s+ey[A-Za-z0-9._-]{20,}")
 # Placeholders that look like values but are not.
 PLACEHOLDER = re.compile(

@@ -587,9 +587,14 @@ def _extract_webhook_url(page: Page) -> str:
 
 def _store(url: str) -> int:
     """Put the URL in the azd environment, never in the repo or the console."""
+    # shell=False deliberately. Webhook URLs always contain '&', and on Windows
+    # shell=True joins the argument list into one string, where '&' becomes a
+    # command separator -- the URL is silently truncated and the rest is
+    # executed as commands. That failed loudly here; it could just as easily
+    # have stored half a URL.
     proc = subprocess.run(
         ["azd", "env", "set", "TEAMS_WEBHOOK_URL", url],
-        capture_output=True, text=True, cwd=str(REPO), shell=True,
+        capture_output=True, text=True, cwd=str(REPO), shell=False,
     )
     if proc.returncode != 0:
         print("Captured the URL but could not write it to the azd environment:")

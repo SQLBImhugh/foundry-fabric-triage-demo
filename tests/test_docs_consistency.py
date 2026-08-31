@@ -84,18 +84,25 @@ def test_internal_doc_links_resolve(doc: Path) -> None:
     assert not broken, f"{doc.name} has broken links: {broken}"
 
 
-def test_teams_is_described_as_mocked_until_wired() -> None:
-    """The one claim most likely to become a lie.
+def test_teams_delivery_claim_matches_reality() -> None:
+    """The claim most likely to become a lie, in either direction.
 
-    Teams delivery is not wired: the card is real, nothing has been posted. If
-    someone wires it up they should update these, and if they do not, the docs
-    must keep saying so. A walkthrough implying a delivered notification is the
-    single most damaging inaccuracy this repo could ship.
+    Teams delivery is now wired: the agent posts an Adaptive Card to a real
+    channel over a Power Automate Workflows webhook, and the walkthrough shows
+    the real post rather than a rendering. This test pins that the document and
+    the deployment agree.
+
+    If the webhook is ever removed, the walkthrough must go back to saying
+    delivery is unwired -- a document implying a delivered notification that
+    never arrives is the single most damaging inaccuracy this repo could ship.
     """
     walkthrough = (REPO_ROOT / "walkthrough" / "WALKTHROUGH.html").read_text(
         encoding="utf-8", errors="ignore"
     )
-    assert "not wired" in walkthrough or "mocked" in walkthrough, (
-        "The walkthrough no longer states that Teams delivery is unwired. "
-        "Either wire it and update this test, or restore the caveat."
+    claims_live = "shot-teams-live.png" in walkthrough
+    claims_unwired = "not wired" in walkthrough or "notifier is mocked" in walkthrough
+
+    assert claims_live != claims_unwired, (
+        "The walkthrough must either show the real posted card or say delivery "
+        "is unwired -- not both, and not neither."
     )

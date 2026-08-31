@@ -18,28 +18,22 @@ azd ai agent show bi-triage-controller        # hosted controller is running
 - [ ] `preflight` clean for the mode you are presenting
 - [ ] Foundry agents in sync — **a stale registration silently runs the old definition**
 - [ ] Hosted controller responding: `azd ai agent invoke bi-triage-controller "sweep"`
-- [ ] **Teams wired, or the beat cut.** `TEAMS_WEBHOOK_URL` is empty by default and
-      notifications are mocked. To make them real:
+- [ ] **Teams is wired — verify it still delivers.** `TEAMS_WEBHOOK_URL` is set and
+      the agent posts a real Adaptive Card to **Data Platform Operations → BI
+      Alerts**. Confirm with a scenario run before the session; a webhook can be
+      deleted or its flow turned off without anything else changing.
+
+      If it has stopped working, recreate it (channel **⋯ → Workflows → "Post to
+      a channel when a webhook request is received"**) and:
 
       ```powershell
-      python scripts\setup_teams_webhook.py --login    # once - sign in as the DEMO tenant
-      python scripts\setup_teams_webhook.py --create --headed
+      python scripts\setup_teams_webhook.py --set-url "<url>"
       azd deploy bi-triage-controller --no-prompt
       ```
 
-      The login step matters: Windows SSO signs Edge in as your **corporate**
-      account, and a flow created there lands in the wrong tenant while looking
-      like it worked. `--login` pre-fills the demo account; check the account it
-      offers before accepting.
-
-      `--create --headed` lets you watch it, which is worth doing the first time
-      because Power Automate's UI moves. If it cannot find a control it stops
-      before submitting, screenshots, and tells you — nothing is half-created.
-      Fall back to doing it by hand and `--set-url "<url>"`.
-
       Old Office 365 connector webhooks were retired 22 May 2026 and will not work.
-      If you skip this entirely, use `triage-demo teams-preview` to show the card
-      and say plainly that delivery is not wired — do not imply it is.
+      Posts appear as the Workflows bot rather than a custom name — a property of
+      the replacement, worth knowing before a customer sees it.
 - [ ] Teams channel open in a visible window
 - [ ] Flag table open (Excel or the portal) showing its "before" state
 - [ ] Terminal font large enough to read from the back of the room
