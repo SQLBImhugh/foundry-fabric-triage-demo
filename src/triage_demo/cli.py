@@ -787,7 +787,15 @@ def cmd_reset(args: argparse.Namespace) -> int:
     runner = TriageRunner(settings, base_dir=REPO_ROOT)
     runner.flag_table.reset()
     runner.store.reset()
-    console.print("[green]Flag table and incident store cleared.[/green]")
+
+    # Also clear which mail has been triaged. Without this a rehearsal looks
+    # broken in the most confusing way available: the incident store is empty,
+    # the alert is sitting in the mailbox, and the sweep reports "no new
+    # alerts" because it still remembers handling it on the previous run.
+    processed = runner.build_processed_log()
+    processed.reset()
+
+    console.print("[green]Flag table, incident store and processed-mail log cleared.[/green]")
     return 0
 
 

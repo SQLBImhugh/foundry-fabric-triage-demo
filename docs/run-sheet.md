@@ -290,6 +290,10 @@ Offer: this repo, the agent definitions, the prompts, the tool schemas, the
 | Foundry call fails | `TRIAGE_PROVIDER_MODE=mock`. Narrative is unchanged |
 | Teams post fails | `TEAMS_MODE` unset → mock notifier renders the card in the terminal |
 | Suppression doesn't fire | An earlier run left no *open* incident. `triage-demo reset`, re-run scenario 2b whole |
+| A live sweep reports "no new alerts" but mail is sitting there | It was triaged on an earlier sweep and recorded in the processed-mail log. `triage-demo reset` clears it, or send a fresh alert |
+| No Teams card for a recurring alert | Expected: an incident is announced once. Check `notified_count` in the incident record. `triage-demo reset` to announce again |
+| The Teams channel fills with identical cards | The routine is running against mail that keeps being re-ingested. `azd ai routine disable bi-triage-schedule`, then check the processed-mail log is durable — the container logs an error at startup if it degraded to in-memory |
+| The routine is enabled again after a deploy | `azd deploy` re-upserts it from `azure.yaml`, where `enabled: true`. Disable it *after* deploying, not before |
 | Incident queue looks empty in section 6 | A later `run` cleared it. Re-run scenario 3, then use `--keep-incidents` on anything after it |
 | Agent behaves oddly in Foundry mode | Almost certainly a stale registration. `register_foundry_agents.py --dry-run` |
 | Everything is on fire | Both modes to `mock`. Every scenario still runs, offline, in seconds |
