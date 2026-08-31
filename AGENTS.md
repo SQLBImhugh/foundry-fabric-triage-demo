@@ -76,6 +76,11 @@ azd ai agent monitor bi-triage-controller
     Calling Power BI with an empty id returned 404, and the model turned that
     into a confident, wrong conclusion. Validate inputs at the boundary; a
     plausible answer built on a failed call is the worst outcome available.
+15. **The walkthrough pages stay self-contained.** They are handed over as
+    links, and the SharePoint/Teams preview renders an `.html` under a policy
+    that drops external stylesheets and images *without reporting it* — the
+    page simply arrives unstyled with empty figures. After recapturing a
+    screenshot or editing `walkthrough.css`, run `scripts/inline_assets.py`.
 
 ## Adding things
 
@@ -92,6 +97,10 @@ parametrized list in `tests/test_scenarios.py`. The `expect` block is the test.
 **A prompt change**: prompts are hashed onto every incident, so a change is
 traceable. If running in Foundry mode, **re-register the agents** or the change
 does not take effect.
+
+**A screenshot**: capture it into `walkthrough/shots/`, reference it normally
+with `<img src="shots/...">`, then run `scripts/inline_assets.py` to embed it.
+The original path is kept in `data-src`, so the embed can always be refreshed.
 
 **A playbook**: add a `Playbook` to `knowledge/playbooks.py` with triggers, a
 `retry_useful` verdict and a **public** Microsoft Learn source, then a test that

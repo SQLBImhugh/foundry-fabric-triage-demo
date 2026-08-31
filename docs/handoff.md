@@ -24,6 +24,17 @@ Writes to `handoff/`, which is gitignored — it is generated, not source.
 | Architecture | `docs/hosted-architecture.md` | What runs where and which identity does it |
 | Model comparison | `docs/model-selection.md` | Why this model, and the fallback |
 | Walkthrough | `walkthrough/WALKTHROUGH.html` | The annotated version for people who were not present |
+| Persona scenario | `walkthrough/PERSONAS.html` | The same runs from the user's side |
+
+Both walkthrough pages are single self-contained files — the stylesheet and
+every screenshot are embedded, so nothing else from `walkthrough/` goes with
+them.
+
+Verified in the demo tenant: uploaded to a Teams channel's Files tab, both the
+file itself and a **Share** link render in the browser with all figures intact.
+Pasting the raw file path downloads the file instead, because SharePoint serves
+`.html` that way unless custom scripting is enabled on the site. Send the link
+the Share button produces, not the one in the address bar.
 
 ## What must not go in it
 

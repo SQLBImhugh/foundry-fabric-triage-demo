@@ -72,6 +72,12 @@ body {
 
 .topnav a:hover { color: var(--text); border-bottom-color: var(--accent-dim); }
 
+/* Cross-document references are text, not links: the SharePoint and Teams
+   preview sandbox drops outbound navigation, so a link between the two pages
+   would look live and do nothing. The filename is shown instead. */
+.docref { color: var(--text-dim); font-size: 13.5px; white-space: nowrap; }
+.docref b { color: var(--text); font-weight: 600; }
+
 /* ---------- layout ---------- */
 
 .wrap { max-width: 1180px; margin: 0 auto; padding: 0 32px 120px; }

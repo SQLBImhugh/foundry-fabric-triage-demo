@@ -142,16 +142,26 @@ tests/                 287 tests, all offline
 Open the walkthrough locally:
 
 ```powershell
-cd walkthrough
-..\.venv\Scripts\python.exe -m http.server 8899
-# then browse http://127.0.0.1:8899/WALKTHROUGH.html
+Invoke-Item walkthrough\WALKTHROUGH.html
 ```
+
+Both pages are self-contained — the stylesheet and every screenshot are embedded
+in the file. That is what makes them shareable: SharePoint and Teams render an
+`.html` through a preview host that blocks external stylesheets and images and
+reports nothing, so a page with linked assets arrives unstyled with empty
+figures and no explanation. Share the link the **Share** button gives you; a raw
+file path downloads the file rather than previewing it.
 
 Regenerate its terminal captures after a code change:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\capture_walkthrough.py
+.\.venv\Scripts\python.exe scripts\inline_assets.py   # re-embed the new captures
+.\.venv\Scripts\python.exe scripts\preview_check.py   # render under the preview policy
 ```
+
+Skipping the second step leaves the shared copy showing the previous
+screenshots; `tests/test_walkthrough_sandbox.py` fails if that happens.
 
 ## Running against a real tenant
 

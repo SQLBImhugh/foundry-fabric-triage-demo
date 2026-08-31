@@ -67,6 +67,9 @@ azd ai agent monitor bi-triage-controller
     confident, wrong conclusion.
 12. **Never weaken a policy limit to make a scenario pass** — change the
     scenario.
+13. **The walkthrough pages stay self-contained.** The SharePoint/Teams preview
+    drops external CSS and images without reporting it. After changing a
+    screenshot or the stylesheet, run `scripts/inline_assets.py`.
 
 ## Style
 
