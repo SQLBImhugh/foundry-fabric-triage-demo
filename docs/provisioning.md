@@ -218,6 +218,48 @@ mentioning before someone notices on screen:
 - posts appear as the **Workflows bot**; custom name and icon are not carried over
 - interactive MessageCard buttons are not supported; use Adaptive Card actions
 
+## 6b. Approval callback
+
+The approval card's Approve/Decline buttons are `Action.OpenUrl` links. They
+have to be: a card posted through an incoming webhook has no bot behind it, so
+`Action.Submit` renders a button that silently does nothing.
+
+They point at a Consumption Logic App that writes the decision into the same
+`approvals` table the agent polls:
+
+```powershell
+az deployment group create -g BITriageDemo -n approval-callback `
+  --template-file infra\approval-callback.json `
+  --parameters tableEndpoint=https://<account>.table.core.windows.net
+
+# grant its identity table access - no keys involved
+az role assignment create --assignee-object-id <principalId from the output> `
+  --assignee-principal-type ServicePrincipal `
+  --role "Storage Table Data Contributor" --scope <storage account id>
+
+# capture the trigger URL into the azd environment (gitignored)
+azd env set APPROVAL_CALLBACK_URL "<listCallbackUrl value>"
+azd deploy
+```
+
+**Why a Logic App and not a Power Automate flow.** The Azure Table connector
+authenticates with a shared account key, and `allowSharedKeyAccess` is `false`
+on this storage account by tenant policy — correctly, and not worth fighting.
+An HTTP-triggered flow is also a premium trigger the demo tenant is not
+licensed for. The Logic App uses a system-assigned managed identity against the
+Table REST API, so there is no key anywhere.
+
+**The callback URL is a bearer credential.** Anyone holding the link can answer
+an approval. It lives in the azd environment, never in the repo, and
+`build_handoff.py` treats it as a secret. The fingerprint in the link binds it
+to one action, and the Logic App refuses a request that is unknown, already
+answered, expired, or whose fingerprint does not match — after which the agent
+revalidates all of it anyway.
+
+**Leaving it unset is a valid configuration.** The card then shows the request
+id and says to answer with `triage-demo approve <request>`, which needs no
+infrastructure at all.
+
 Treat the URL as a secret: anyone holding it can post to the channel. That is
 acceptable in a demo tenant — say so out loud rather than letting someone assume
 otherwise.

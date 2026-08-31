@@ -202,6 +202,20 @@ The buttons are `Action.OpenUrl`, not `Action.Submit`. A card posted through an
 incoming webhook has no bot behind it, so a submit button renders a control that
 silently does nothing — which looks exactly like a recorded decision.
 
+**What the buttons point at.** A Consumption Logic App
+(`infra/approval-callback.json`) with an HTTP trigger, which writes the decision
+to the approvals table using its own managed identity. Not a Power Automate
+flow: the Azure Table connector authenticates with a shared account key and
+`allowSharedKeyAccess` is `false` here by tenant policy, and an HTTP-triggered
+flow is a premium trigger. The Logic App needs no key and no licence.
+
+It refuses a request that does not exist, one already answered, one that has
+expired, and one whose fingerprint does not match the link — then the agent
+revalidates all of it independently. The callback URL is a bearer credential:
+anyone holding the link can answer. The fingerprint binding limits it to that
+one action, it lives in the azd environment rather than the repo, and the
+handoff scanner treats it as a secret.
+
 **The clock stops while a person decides.** `PolicyLedger.awaiting_human()`
 excludes that time from the wall clock. The run timeout and the approval timeout
 both default to 300s, so charging the agent for reading time would fail the run

@@ -85,6 +85,27 @@ def test_workflows_webhook_url_is_treated_as_a_credential() -> None:
     assert build_handoff.WEBHOOK_URL.search(new_format)
 
 
+def test_the_approval_callback_url_is_treated_as_a_credential() -> None:
+    """Anyone holding this link can answer an approval.
+
+    Caught twice by the URL rule and once by the name rule. The name rule
+    matters on its own: a callback that never grew a ``sig`` parameter, or one
+    behind a different host, would still be a credential in a config line.
+    """
+    url = (
+        "https://prod-52.eastus.logic.azure.com:443/workflows/abc/triggers/manual/"
+        "paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun"
+        "&sv=1.0&sig=FAKEsigVALUE123"
+    )
+    assert build_handoff.WEBHOOK_URL.search(url)
+    assert _detects(f'APPROVAL_CALLBACK_URL="{url}"')
+    assert _detects("approval_callback_url: https://example.invalid/abcdefghijklmnop")
+
+    # ...and an unset one is still not a leak.
+    assert not _detects('APPROVAL_CALLBACK_URL=""')
+    assert not _detects("APPROVAL_CALLBACK_URL=<your-callback-url>")
+
+
 def test_bearer_tokens_are_detected() -> None:
     assert build_handoff.BEARER_TOKEN.search(
         "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9fake"

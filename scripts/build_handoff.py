@@ -46,7 +46,8 @@ SECRET_ASSIGNMENT = re.compile(
     # preceding underscore is itself a word character. That bug made this
     # scanner report "clean" while being incapable of detecting the single most
     # likely leak, which is worse than having no scanner at all.
-    (client[_-]?secret | api[_-]?key | password | webhook[_-]?url | connection[_-]?string)
+    (client[_-]?secret | api[_-]?key | password | webhook[_-]?url | callback[_-]?url
+     | connection[_-]?string)
     # Horizontal whitespace only. \s* spans newlines, which made an *empty*
     # "GRAPH_CLIENT_SECRET=" swallow the following line and report the next
     # setting as its value -- flagging a blank template as a leak.
@@ -58,7 +59,8 @@ SECRET_ASSIGNMENT = re.compile(
 # A Workflows webhook URL is itself the credential. Two formats in the wild:
 # the older logic.azure.com one, and the newer Power Platform environment host.
 # The new format carries the same 'sig' bearer parameter and would have sailed
-# past a check that only knew about the old one.
+# past a check that only knew about the old one. The approval callback is the
+# same shape again -- anyone holding that link can answer an approval.
 WEBHOOK_URL = re.compile(
     r"https://[^\s\"']*(?:logic\.azure\.com|powerplatform\.com)[^\s\"']*sig=[^\s\"'&]+",
     re.I,

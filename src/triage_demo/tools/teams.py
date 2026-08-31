@@ -93,10 +93,17 @@ class MockTeamsNotifier:
     """Collects messages in memory so tests can assert on them."""
 
     messages: list[ResolutionSummary] = field(default_factory=list)
+    cards: list[dict[str, Any]] = field(default_factory=list)
 
     async def post(self, summary: ResolutionSummary) -> dict[str, Any]:
         self.messages.append(summary)
         logger.info("Teams (mock) <- %s", summary.title)
+        return {"status": "ok", "delivered": True, "transport": "mock"}
+
+    async def post_card(self, card: dict[str, Any]) -> dict[str, Any]:
+        """Mirrors the real notifier so tests exercise the same code path."""
+        self.cards.append(card)
+        logger.info("Teams (mock) <- card")
         return {"status": "ok", "delivered": True, "transport": "mock"}
 
     @property
@@ -131,11 +138,25 @@ class WorkflowsWebhookTeamsNotifier:
         self._timeout = timeout
 
     async def post(self, summary: ResolutionSummary) -> dict[str, Any]:
+        return await self._send(summary.to_adaptive_card())
+
+    async def post_card(self, card: dict[str, Any]) -> dict[str, Any]:
+        """Post an already-built card.
+
+        ``TeamsCardApprovalGate`` looks for this method and falls back to a
+        plain summary when it is missing -- which is what happened here: the
+        approval card, buttons and all, was built, tested, and then quietly
+        replaced with a text summary on the way out. The human saw a
+        notification with nothing to click.
+        """
+        return await self._send(card)
+
+    async def _send(self, payload: dict[str, Any]) -> dict[str, Any]:
         import httpx
 
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
-                resp = await client.post(self._url, json=summary.to_adaptive_card())
+                resp = await client.post(self._url, json=payload)
         except httpx.HTTPError as exc:
             # A notification failure must be reported as a failure. Swallowing
             # it produces a run that claims it told a human when it did not.

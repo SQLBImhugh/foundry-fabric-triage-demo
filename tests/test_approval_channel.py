@@ -127,7 +127,7 @@ async def test_the_gate_returns_a_decision_that_arrives_while_it_waits() -> None
     assert decision.decided_by == "priya"
     valid, why = decision.is_valid_for(request)
     assert valid, why
-    assert notifier.messages, "the human was never actually asked"
+    assert notifier.cards or notifier.messages, "the human was never actually asked"
 
 
 async def test_a_decline_is_a_decline() -> None:
@@ -154,6 +154,33 @@ async def test_a_decline_is_a_decline() -> None:
     assert not decision.granted
     assert decision.outcome == "denied"
     assert "month end" in decision.reason
+
+
+async def test_the_card_with_its_buttons_is_what_actually_gets_posted() -> None:
+    """The gate falls back to a plain summary when the notifier cannot take a card.
+
+    That is exactly what happened: ``WorkflowsWebhookTeamsNotifier`` had no
+    ``post_card``, so the approval card was built, tested, and then silently
+    replaced with a text summary on the way out. The human got a notification
+    with nothing to click, and every test still passed because they all
+    inspected ``build_card`` rather than what was delivered.
+    """
+    notifier = MockTeamsNotifier()
+    channel = InMemoryApprovalChannel()
+    gate = TeamsCardApprovalGate(
+        notifier,
+        decision_source=channel,
+        poll_seconds=0.01,
+        callback_url="https://example.invalid/flow",
+    )
+    request = make_request(timeout_seconds=1)
+
+    await gate.request_approval(request)
+
+    assert notifier.cards, "the card was not delivered; a summary went instead"
+    actions = notifier.cards[0]["attachments"][0]["content"]["actions"]
+    assert [a["title"] for a in actions] == ["Approve", "Decline"]
+    assert request.fingerprint in actions[0]["url"]
 
 
 async def test_the_gate_registers_the_request_before_asking() -> None:
