@@ -18,9 +18,11 @@ import subprocess
 import sys
 from datetime import UTC, datetime
 
-MAILBOX = "Mork@mngenvmcap777813.onmicrosoft.com"
-TENANT = "edf144d9-f468-4b8e-8443-f51dadfbc4f9"
-CLIENT_ID = "1e9b4eeb-f169-444e-8b46-a666d31a5bbb"
+from _tenant import required
+
+MAILBOX = required("GRAPH_MAILBOX", "the mailbox the alert is written into")
+TENANT = required("GRAPH_TENANT_ID", "the tenant that owns the mailbox")
+CLIENT_ID = required("GRAPH_CLIENT_ID", "the app registration with Mail.ReadWrite")
 GRAPH = "https://graph.microsoft.com/v1.0"
 
 SUBJECT = "Power BI: Refresh failed for 'Completions Daily Rollup'"

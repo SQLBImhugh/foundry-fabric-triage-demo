@@ -11,7 +11,7 @@ Result when this was last run (2026-08-28)
 Windows SSO **works**: a fresh Edge profile reached Power Automate fully
 rendered, no prompt, no credentials. But it signed in to the **corporate**
 tenant -- the environment header read "Default Environment - Approved Use Only"
-and Teams redirected with ``loginHint=mhugh@microsoft.com``.
+and Teams redirected with ``loginHint=<the signed-in work account>``.
 
 The demo lives in a different tenant. A webhook created by automation here
 would be created in the wrong place, and would look like it had worked. So

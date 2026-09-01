@@ -16,15 +16,17 @@ import subprocess
 import sys
 import time
 
+from _tenant import required
+
 GRAPH = "https://graph.microsoft.com/v1.0"
-DOMAIN = "mngenvmcap777813.onmicrosoft.com"
+DOMAIN = required("DEMO_TENANT_DOMAIN", "the domain the Teams channel members belong to")
 
 TEAM_NAME = "Data Platform Operations"
 TEAM_DESCRIPTION = "Runs the BI platform. Where refresh failures surface and get decided on."
 CHANNEL_NAME = "BI Alerts"
 CHANNEL_DESCRIPTION = "Automated triage notifications from the BI request triage agent."
 
-OWNER = f"mhugh@{DOMAIN}"
+OWNER = required("DEMO_TEAM_OWNER", "the UPN that owns the created team")
 MEMBERS = [f"sam.okafor@{DOMAIN}", f"priya.raman@{DOMAIN}"]
 
 

@@ -20,7 +20,9 @@ import string
 import subprocess
 import sys
 
-DOMAIN = "mngenvmcap777813.onmicrosoft.com"
+from _tenant import required
+
+DOMAIN = required("DEMO_TENANT_DOMAIN", "the domain the persona accounts are created in")
 GRAPH = "https://graph.microsoft.com/v1.0"
 
 # Licences: E5 (no Teams) plus the standalone Teams SKU this tenant uses, and

@@ -34,7 +34,7 @@
     "tableEndpoint": {
       "type": "string",
       "metadata": {
-        "description": "e.g. https://bitriagestore6343.table.core.windows.net"
+        "description": "e.g. https://<storage-account>.table.core.windows.net"
       }
     },
     "tableName": {

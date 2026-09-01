@@ -28,7 +28,7 @@ BLUEPRINT_APP_ID = "d867c2f2-944e-481f-b53a-ade5efbe34e1"
 GRAPH_SP_ID = "e5de9d43-9f96-4e98-9f7b-4a2c435cd551"
 MAIL_READ_ROLE = "810c84a8-4a9e-49e6-bf7d-12d183f40d01"
 
-PREFIX = "bitriage-foundry-eus-bi-request-triage"
+PREFIX = "contoso-foundry-bi-request-triage"
 
 
 class FakeGraph:
@@ -137,8 +137,8 @@ def _directory(
     "endpoint,expected",
     [
         (
-            "https://bitriage-foundry-eus.services.ai.azure.com/api/projects/bi-request-triage",
-            "bitriage-foundry-eus-bi-request-triage",
+            "https://contoso-foundry.services.ai.azure.com/api/projects/bi-request-triage",
+            "contoso-foundry-bi-request-triage",
         ),
         ("https://acct.services.ai.azure.com/api/projects/proj", "acct-proj"),
         ("", ""),
@@ -260,7 +260,7 @@ def test_directory_read_failures_degrade_instead_of_crashing() -> None:
     assert report.graph_app_roles == ["Mail.Read on Microsoft Graph"]
 
 
-APP_ID = "1e9b4eeb-f169-444e-8b46-a666d31a5bbb"
+APP_ID = "3f2b91c4-77ad-4e10-9c55-b81e6a0d2f47"
 APP_OBJ = "f1e6a93b-a17b-44b6-a837-b1e6b50eb985"
 APP_SP = "809f7034-8adc-4dea-bc8e-124b73cfd8c4"
 

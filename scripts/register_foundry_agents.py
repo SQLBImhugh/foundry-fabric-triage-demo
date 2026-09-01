@@ -38,16 +38,19 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from triage_demo.prompts import load_prompt  # noqa: E402
+from triage_demo.settings import Settings  # noqa: E402
 from triage_demo.tools.registry import TRIAGE_TOOLS  # noqa: E402
 
 API_VERSION = "v1"
 SCOPE = "https://ai.azure.com"
 
-DEFAULT_ENDPOINT = os.environ.get(
-    "FOUNDRY_PROJECT_ENDPOINT",
-    "https://bitriage-foundry-eus.services.ai.azure.com/api/projects/bi-request-triage",
-)
-DEFAULT_MODEL = os.environ.get("FOUNDRY_AGENT_MODEL", "gpt-5.6-luna")
+# Read through Settings rather than os.environ so this script sees the same .env
+# the application does. It previously read raw environment variables behind a
+# hardcoded endpoint default, which meant it appeared to work while ignoring
+# .env entirely -- the default was doing the work, not the configuration.
+_settings = Settings()
+DEFAULT_ENDPOINT = _settings.foundry_project_endpoint
+DEFAULT_MODEL = _settings.foundry_agent_model
 
 
 # ---------------------------------------------------------------------------
@@ -254,14 +257,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--endpoint", default=DEFAULT_ENDPOINT)
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--triage-name", default=os.environ.get("FOUNDRY_TRIAGE_AGENT_NAME", "bi-triage"))
-    parser.add_argument("--dq-name", default=os.environ.get("FOUNDRY_DQ_AGENT_NAME", "bi-data-quality"))
+    parser.add_argument("--triage-name", default=_settings.foundry_triage_agent_name)
+    parser.add_argument("--dq-name", default=_settings.foundry_dq_agent_name)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--print-definitions", action="store_true")
     parser.add_argument("--with-guardrail", action="store_true",
                         help="Also create/update the RAI guardrail policy")
-    parser.add_argument("--account", default="bitriage-foundry-eus")
-    parser.add_argument("--resource-group", default="BITriageDemo")
+    parser.add_argument("--account", default=os.environ.get("FOUNDRY_ACCOUNT_NAME", ""))
+    parser.add_argument("--resource-group", default=os.environ.get("AZURE_RESOURCE_GROUP", ""))
     parser.add_argument("--guardrail-name", default="bi-triage-guardrail")
     args = parser.parse_args(argv)
 
@@ -278,6 +281,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     endpoint = args.endpoint.rstrip("/")
+    if not endpoint:
+        print(
+            "ERROR: no project endpoint. Set FOUNDRY_PROJECT_ENDPOINT in .env "
+            "or pass --endpoint. See .env.example.",
+            file=sys.stderr,
+        )
+        return 2
     headers = {"Authorization": f"Bearer {_token()}", "Content-Type": "application/json"}
 
     print(f"project: {endpoint}")

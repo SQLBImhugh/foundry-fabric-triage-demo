@@ -41,6 +41,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _tenant import optional, required
 from playwright.sync_api import Page, sync_playwright
 from playwright.sync_api import TimeoutError as PWTimeout
 
@@ -122,8 +123,10 @@ def _cloned_profile_dir() -> str:
     return ""
 
 
-DEMO_TENANT_DOMAIN = "mngenvmcap777813"
-DEMO_TENANT_ID = "edf144d9-f468-4b8e-8443-f51dadfbc4f9"
+DEMO_TENANT_DOMAIN = required(
+    "DEMO_TENANT_DOMAIN", "the tenant the webhook is created in"
+).lower()
+DEMO_TENANT_ID = required("GRAPH_TENANT_ID", "the tenant the webhook is created in")
 
 
 EDGE_USER_DATA = Path.home() / "AppData" / "Local" / "Microsoft" / "Edge" / "User Data"
@@ -624,8 +627,8 @@ def main() -> int:
         help="Seed the session from an existing Edge profile (e.g. MorkNet)",
     )
     parser.add_argument(
-        "--account", default="mhugh@MngEnvMCAP777813.onmicrosoft.com",
-        help="Demo-tenant account to pre-fill at sign-in",
+        "--account", default=optional("DEMO_TEAM_OWNER"),
+        help="Demo-tenant account to pre-fill at sign-in (default: $DEMO_TEAM_OWNER)",
     )
     parser.add_argument(
         "--headless", action="store_true",

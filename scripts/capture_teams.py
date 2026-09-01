@@ -13,6 +13,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from _tenant import required
 from playwright.sync_api import sync_playwright
 
 REPO = Path(__file__).resolve().parents[1]
@@ -20,7 +21,7 @@ PROFILE = REPO / ".browser-profile"
 OUT = REPO / "walkthrough" / "shots"
 DEBUG = REPO / ".browser-debug"
 
-TENANT = "edf144d9-f468-4b8e-8443-f51dadfbc4f9"
+TENANT = required("GRAPH_TENANT_ID", "the tenant whose Teams channel is captured")
 TEAMS_URL = f"https://teams.microsoft.com/v2/?tenantId={TENANT}"
 
 
