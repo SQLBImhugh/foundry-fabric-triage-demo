@@ -87,7 +87,7 @@ Everything runs with no tenant, no Azure login, no network.
 | CLI with live event rendering | `src/triage_demo/cli.py` |
 | 287 tests | `tests/` |
 
-**Exit criteria (met)**: all five scenarios pass their assertions offline;
+**Exit criteria (met)**: all scenarios pass their assertions offline;
 `ruff check` clean; every scenario produces the same outcome, the same tool
 sequence and the same evidence numbers on every run. (Timestamps and generated
 ids do vary — the *decisions* are reproducible, not the bytes.)
@@ -380,10 +380,10 @@ and it lands better than a smaller number that turns out to be wrong.
 ## Turning this into a solution accelerator
 
 The demo proves the control behaviour thoroughly and the failure taxonomy
-thinly: of eight scenarios, six are about what the controller refuses and two
-are about a failure type. Nine failure modes are recognised and three can now be
-acted on. For an accelerator the ratio that matters is recognised-to-actionable,
-so that is what the next work targets.
+thinly: most of the nine scenarios are about what the controller refuses or
+gates rather than about a distinct failure type. Nine failure modes are
+recognised and three can now be acted on. For an accelerator the ratio that
+matters is recognised-to-actionable, so that is what the next work targets.
 
 | Scope | Document |
 |---|---|
@@ -480,5 +480,5 @@ demo. They belong in the production table above, not in Phase 1.
 | Incidents in Azure Tables, not a file | A container's filesystem goes away on recycle. Incident state is what stops the agent remediating the same failure twice after a restart |
 | Agent identity everywhere it works; one app registration for mail | Verified: Graph directory and Power BI accept an agent identity, Exchange does not. Showing the one remaining secret is a stronger argument than hiding it |
 | Inbox relevance filter, failing closed | An agent that acts on every message is steerable by anyone who can email it. Unfiltered it triaged security digests and crashed |
-| Model chosen by running all seven scenarios | Both passed; the chosen one was faster and needed one fewer controller correction. A preference backed by a number survives a challenge |
+| Model chosen by running every scenario against both | Both passed. The chosen one needed one fewer controller correction; on the latest run the two were within a second per scenario on latency, so behaviour decided it. A preference backed by a number survives a challenge |
 | Both model pairs left registered | The fallback needs no provisioning under time pressure |

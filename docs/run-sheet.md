@@ -44,11 +44,21 @@ On the fallback: if the tenant misbehaves mid-session, change two environment
 variables and keep going. Do not debug Azure in front of the customer.
 
 **Model fallback.** If `gpt-5.6-luna` is unavailable, a `gpt-5.4` pair is
-already registered and passes every scenario — see `docs/model-selection.md`:
+already registered. Both pairs passed all nine scenarios on 2026-09-01 at
+roughly 48s per scenario — see `docs/model-selection.md`:
 
 ```powershell
 $env:FOUNDRY_TRIAGE_AGENT_NAME = "bi-triage-54"
 $env:FOUNDRY_DQ_AGENT_NAME     = "bi-data-quality-54"
+```
+
+Nothing re-registers the fallback pair automatically, so it drifts behind the
+primary after a tool-schema change. If scenarios have been added or tools
+changed since that date, re-register it before relying on it:
+
+```powershell
+python scripts\register_foundry_agents.py --model gpt-5.4 `
+    --triage-name bi-triage-54 --dq-name bi-data-quality-54
 ```
 
 ---

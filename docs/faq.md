@@ -223,7 +223,7 @@ table in [`plan.md`](plan.md), and it is real work.
 Three layers. The controller loop is tested with a scripted provider, so tests
 assert on orchestration rather than model output. The deterministic pieces —
 signatures, redaction, duplicate detection, policy — are tested directly. And the
-five scenarios run end to end offline in CI, so a broken demo fails a test rather
+every scenario runs end to end offline in CI, so a broken demo fails a test rather
 than failing in front of a customer.
 
 90 tests, no network.

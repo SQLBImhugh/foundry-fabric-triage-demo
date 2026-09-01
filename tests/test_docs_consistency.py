@@ -59,11 +59,34 @@ def test_documented_cli_commands_exist(doc: Path) -> None:
     assert not unknown, f"{doc.name} references non-existent commands: {sorted(unknown)}"
 
 
+#: Small numbers are spelled out in this repo's prose, so a digits-only check
+#: misses the claims most likely to be written. "all seven scenarios" survived
+#: two scenario additions unnoticed for exactly this reason.
+WORD_NUMBERS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+    "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+}
+
+
+def _as_int(token: str) -> int:
+    return int(token) if token.isdigit() else WORD_NUMBERS[token.lower()]
+
+
 @pytest.mark.parametrize("doc", DOCS, ids=lambda p: p.name)
 def test_scenario_count_claims_match_reality(doc: Path) -> None:
     """A doc claiming "N scenarios" must agree with the scenarios directory."""
     actual = len(list((REPO_ROOT / "scenarios").glob("*.yaml")))
-    claimed = {int(n) for n in re.findall(r"\b(\d+) scenarios\b", _read(doc))}
+    words = "|".join(WORD_NUMBERS)
+    number = rf"(?:\d+|{words})"
+    # Only unambiguous claims about the whole suite. A doc may legitimately say
+    # "the two scenarios as specified" or "failed two scenarios on run two"
+    # without asserting a total, and a check that flags those is one somebody
+    # switches off.
+    text = _read(doc)
+    claimed = {
+        _as_int(n)
+        for n in re.findall(rf"\b(?:all|of) ({number}) scenarios\b", text, re.I)
+    }
     wrong = {n for n in claimed if n != actual}
     assert not wrong, f"{doc.name} claims {sorted(wrong)} scenarios; there are {actual}"
 

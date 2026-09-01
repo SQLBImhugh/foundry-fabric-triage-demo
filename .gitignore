@@ -44,3 +44,8 @@ handoff/
 # Browser automation state - holds a signed-in session
 .browser-profile/
 .browser-debug/
+
+# Raw transcripts from scripts/compare_models.py. Live model output, kept so a
+# failed comparison can be diagnosed without paying for every run again -- but
+# it is unreviewed model text about a real tenant, so it never gets committed.
+.compare-runs/
