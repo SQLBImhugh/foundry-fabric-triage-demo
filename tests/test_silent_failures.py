@@ -602,3 +602,31 @@ def test_no_hint_is_invented_for_an_unrelated_failure() -> None:
     assert _permission_hint(429, "TooManyRequests") == ""
     assert _permission_hint(500, "InternalServerError") == ""
     assert _permission_hint(401, "some other unauthorised thing") == ""
+
+def test_a_detector_fault_shows_the_hint_not_the_json() -> None:
+    """The sweep line is short; Power BI's payload would fill all of it.
+
+    Truncating the raw detail cut the hint off entirely, so guidance that was
+    present and correct never reached the person reading the output.
+    """
+    from triage_demo.runner import _fault_summary
+    from triage_demo.tools.semantic_health import _permission_hint
+
+    detail = ('HTTP 401: {"error":{"code":"PowerBINotAuthorizedException",'
+              '"pbi.error":{"code":"PowerBINotAuthorizedException"}}}'
+              + _permission_hint(401, "PowerBINotAuthorizedException"))
+    summary = _fault_summary(detail)
+
+    assert "Direct Lake" in summary
+    assert "fixed identity" in summary
+    assert "pbi.error" not in summary
+    assert "\n" not in summary
+
+
+def test_a_fault_without_a_hint_still_says_something() -> None:
+    assert _fault_summary_plain().startswith("HTTP 500")
+
+
+def _fault_summary_plain() -> str:
+    from triage_demo.runner import _fault_summary
+    return _fault_summary("HTTP 500: InternalServerError, something broke upstream")

@@ -53,6 +53,26 @@ from triage_demo.tools.teams import (
 logger = logging.getLogger("triage.runner")
 
 
+def _fault_summary(detail: str) -> str:
+    """Show the operator what to do, not what the platform said.
+
+    A detector fault gets one short line in the sweep output, and Power BI's
+    error payload is long enough to fill it entirely with a JSON blob that says
+    only ``PowerBINotAuthorizedException``. Truncating the raw detail therefore
+    cut off the hint explaining the cause -- the guidance existed, was correct,
+    and never reached the person reading the line.
+
+    So the hint wins the space when there is one. The full platform error is
+    still recorded on the probe state for anyone diagnosing it afterwards.
+    """
+    marker = "\nHint: "
+    if marker in detail:
+        head, _, hint = detail.partition(marker)
+        code = head.split(":", 1)[0].strip()
+        return f"{code} -- {' '.join(hint.split())}"
+    return detail[:80]
+
+
 @dataclass
 class Expectation:
     """What a scenario asserts. Drives both the tests and the run sheet."""
@@ -383,7 +403,7 @@ class TriageRunner:
             if finding.status == "detector_fault":
                 lines.append(
                     f"- {finding.report_name or finding.probe}: probe could not run "
-                    f"({finding.detail[:80]})"
+                    f"({_fault_summary(finding.detail)})"
                 )
                 continue
 
