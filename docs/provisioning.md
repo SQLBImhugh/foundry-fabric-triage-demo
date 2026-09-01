@@ -285,6 +285,75 @@ demo beat than showing a query result change.
 
 ---
 
+## 7b. Silent-failure detector (optional)
+
+The detector reads semantic models directly rather than waiting for an alert.
+It is off until `SILENT_HEALTH_PROBES` is configured, which is the right
+default: "fresh" is a business question and guessing it produces the false
+positives that get a detector muted.
+
+### What a probe looks like
+
+```json
+[{"name":"sales-invoices",
+  "workspace_id":"<guid>",
+  "dataset_id":"<guid>",
+  "table":"fact_sales_invoice",
+  "date_table":"dim_date",
+  "date_column":"date",
+  "report_name":"Sales invoices",
+  "expected_lag_hours":24,
+  "min_absolute_drop":40}]
+```
+
+**Set `date_table` whenever the measured table holds a date *key* rather than a
+date**, which is what a star schema looks like. Without it the only way to get a
+watermark is to point the probe at the date dimension, and a calendar dimension
+is populated years ahead: on a real model that returned `2030-12-31` while the
+data stopped at `2024-12-23`. The probe would have called a two-year-stale model
+fresh for ever, and looked like it was working.
+
+**Check `min_absolute_drop` against the table's real size.** It defaults to
+1,000 rows, so on a 400-row table row-loss can never fire.
+
+Two scans are needed before anything is announced (`confirmations`, default 2).
+A single sweep marks a probe suspect and says nothing — that is the
+suspect-then-confirm rule, not a fault.
+
+### Permissions, and a limit worth knowing before you plan
+
+The identity that runs the sweep needs **workspace Contributor**, not Viewer.
+
+Viewer plus Build permission on the one dataset would be the least-privileged
+combination, and it is not available to an app-only caller: the dataset users
+API rejects `principalType: App` with *"API supported only for User or Group
+principal types"*, and `executeQueries` requires Build. Contributor is the
+least-privileged workspace role that carries Build for a service principal.
+
+Two tenant settings gate this, both under **Admin portal → Tenant settings**:
+
+| Setting | Needs |
+|---|---|
+| *Allow service principals to use Power BI APIs* | Enabled, **and the identity inside whichever security group it is scoped to** |
+| *Dataset Execute Queries REST API* | Enabled |
+
+The first is the one that costs time. It is commonly enabled but restricted to a
+named security group, so an identity outside that group gets
+`PowerBINotAuthorizedException` (HTTP 401) with nothing to say it is a group
+problem. Insufficient workspace permission reports as `PowerBIEntityNotFound`
+(HTTP 404) rather than 403, so neither status describes its own cause.
+
+Both surface as a **detector fault**, never as a data finding — "I could not
+check" is not "everything is fine", and reporting it as bad data would tell
+somebody their numbers are wrong because of a missing permission.
+
+```powershell
+triage-demo health              # what the probes found
+triage-demo health --baselines  # what healthy looked like last time
+```
+
+---
+
 ## 8. Application Insights (optional)
 
 Set `APPLICATIONINSIGHTS_CONNECTION_STRING` and install the extra:

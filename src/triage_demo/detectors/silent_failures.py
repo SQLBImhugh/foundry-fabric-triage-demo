@@ -68,6 +68,10 @@ class HealthProbe:
     table: str
     report_name: str = ""
     date_column: str = ""
+    #: The dimension holding ``date_column``, when the measured table carries a
+    #: date *key* rather than a date -- which is what a star schema looks like.
+    #: Leave empty when the date lives on the measured table itself.
+    date_table: str = ""
     row_count_table: str = ""
     control_measures: tuple[str, ...] = ()
     #: How far behind "now" the data is expected to be, in hours. A daily model
@@ -87,6 +91,7 @@ class HealthProbe:
             table=str(raw.get("table", "")),
             report_name=str(raw.get("report_name", "")),
             date_column=str(raw.get("date_column", "")),
+            date_table=str(raw.get("date_table", "")),
             row_count_table=str(raw.get("row_count_table", "")),
             control_measures=tuple(raw.get("control_measures") or ()),
             expected_lag_hours=int(raw.get("expected_lag_hours", 24)),
@@ -174,6 +179,7 @@ class SilentFailureScanner:
                 probe.dataset_id,
                 table=probe.table,
                 date_column=probe.date_column,
+                date_table=probe.date_table,
                 row_count_table=probe.row_count_table,
                 control_measures=probe.control_measures,
             )

@@ -93,6 +93,66 @@ def test_quotes_in_configuration_cannot_reshape_the_query() -> None:
     assert "Date]]Col" in dax
 
 
+def test_a_star_schema_takes_its_watermark_through_the_relationship() -> None:
+    """The common shape: a date key on the fact, the date on a dimension.
+
+    Measured live against a real model on 2026-09-01. The fact held
+    ``invoice_date_key`` as an integer and no date column at all, so there was
+    nothing on it to take a MAX of.
+    """
+    dax = build_probe_dax(
+        table="fact_sales_invoice", date_table="dim_date", date_column="date"
+    )
+
+    assert "MAXX('fact_sales_invoice', RELATED('dim_date'[date]))" in dax
+    # Still counted on the fact -- the dimension's row count is the calendar's.
+    assert "COUNTROWS('fact_sales_invoice')" in dax
+
+
+def test_the_star_schema_workaround_that_silently_never_fires() -> None:
+    """Negative control for the bug that motivated ``date_table``.
+
+    Without it, the only way to get a watermark from a star schema is to point
+    the probe at the date dimension. On the real model that returned
+    2030-12-31 -- a calendar populated years ahead -- while the data stopped at
+    2024-12-23. The probe would have called a two-year-stale model fresh, for
+    ever, and looked like it was working.
+
+    So: measuring the dimension must not be mistakable for measuring the fact.
+    """
+    wrong = build_probe_dax(table="dim_date", date_column="date")
+    right = build_probe_dax(
+        table="fact_sales_invoice", date_table="dim_date", date_column="date"
+    )
+
+    assert "MAX('dim_date'[date])" in wrong
+    assert "RELATED" not in wrong
+    assert wrong != right
+    # The counted table is the giveaway: one counts the calendar, one the data.
+    assert "COUNTROWS('dim_date')" in wrong
+    assert "COUNTROWS('fact_sales_invoice')" in right
+
+
+def test_a_date_table_without_a_column_is_refused() -> None:
+    """Half-configured is refused rather than silently ignored.
+
+    Ignoring it would fall back to ``MAX('fact'[...])`` on a column that does
+    not exist, and the detector would report a fault it could not explain.
+    """
+    with pytest.raises(ValueError):
+        build_probe_dax(table="fact_sales_invoice", date_table="dim_date")
+
+
+def test_quotes_in_the_date_table_are_escaped_too() -> None:
+    dax = build_probe_dax(
+        table="Fact'Sales", date_table="Dim'Date", date_column="Date]Col"
+    )
+
+    assert "Dim''Date" in dax
+    assert "Fact''Sales" in dax
+    assert "Date]]Col" in dax
+
+
 # ---------------------------------------------------------------------------
 # Healthy readings stay silent and advance the baseline
 # ---------------------------------------------------------------------------

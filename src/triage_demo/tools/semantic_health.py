@@ -63,6 +63,7 @@ def build_probe_dax(
     *,
     table: str,
     date_column: str = "",
+    date_table: str = "",
     row_count_table: str = "",
     control_measures: tuple[str, ...] = (),
 ) -> str:
@@ -72,18 +73,39 @@ def build_probe_dax(
     limits allow 100,000 rows per query; fetching them would make the detector
     a load source on the capacity it is monitoring.
 
+    ``date_table`` handles the star schema, which is most of them. A fact table
+    usually holds an integer date *key* and no date column at all, so there is
+    nothing on it to take a MAX of. Measuring the date dimension instead is
+    worse than useless: a calendar dimension is populated years ahead, so
+    ``MAX('dim_date'[date])`` returned 2030-12-31 on a real model whose data
+    stopped in 2024. The probe would have reported that model fresh forever --
+    a detector that silently never fires, which is the failure mode this whole
+    component exists to prevent.
+
+    With ``date_table`` set, the watermark is taken across the fact and through
+    the relationship, which is the date the data actually reaches.
+
     Escaping matters here even though the model cannot reach this function:
     configuration is edited by people, and a stray quote in a table name should
     produce a broken query rather than a differently-scoped one.
     """
     if not table.strip():
         raise ValueError("A probe needs a table to measure.")
+    if date_table and not date_column:
+        raise ValueError("date_table needs date_column: which column holds the date?")
 
     parts: list[str] = []
     safe_table = table.replace("'", "''")
     if date_column:
         safe_column = date_column.replace("]", "]]")
-        parts.append(f"\"MaxDate\", FORMAT(MAX('{safe_table}'[{safe_column}]), \"yyyy-mm-dd\")")
+        if date_table:
+            safe_date_table = date_table.replace("'", "''")
+            watermark = (
+                f"MAXX('{safe_table}', RELATED('{safe_date_table}'[{safe_column}]))"
+            )
+        else:
+            watermark = f"MAX('{safe_table}'[{safe_column}])"
+        parts.append(f"\"MaxDate\", FORMAT({watermark}, \"yyyy-mm-dd\")")
     counted = (row_count_table or table).replace("'", "''")
     parts.append(f"\"RowCount\", COUNTROWS('{counted}')")
     for measure in control_measures:
@@ -101,6 +123,7 @@ class SemanticModelHealthClient(Protocol):
         *,
         table: str,
         date_column: str = "",
+        date_table: str = "",
         row_count_table: str = "",
         control_measures: tuple[str, ...] = (),
     ) -> ProbeResult: ...
@@ -126,12 +149,14 @@ class MockSemanticHealthClient:
         *,
         table: str,
         date_column: str = "",
+        date_table: str = "",
         row_count_table: str = "",
         control_measures: tuple[str, ...] = (),
     ) -> ProbeResult:
         query = build_probe_dax(
             table=table,
             date_column=date_column,
+            date_table=date_table,
             row_count_table=row_count_table,
             control_measures=control_measures,
         )
@@ -235,6 +260,7 @@ class LiveSemanticHealthClient:
         *,
         table: str,
         date_column: str = "",
+        date_table: str = "",
         row_count_table: str = "",
         control_measures: tuple[str, ...] = (),
     ) -> ProbeResult:
@@ -250,6 +276,7 @@ class LiveSemanticHealthClient:
         query = build_probe_dax(
             table=table,
             date_column=date_column,
+            date_table=date_table,
             row_count_table=row_count_table,
             control_measures=control_measures,
         )
