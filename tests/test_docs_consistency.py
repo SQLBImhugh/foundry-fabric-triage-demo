@@ -107,6 +107,31 @@ def test_internal_doc_links_resolve(doc: Path) -> None:
     assert not broken, f"{doc.name} has broken links: {broken}"
 
 
+#: Non-markdown things the docs point at: the README's architecture diagram, the
+#: walkthrough pages handed to customers as links, and screenshots. The link
+#: check above only covers ``.md``, so a renamed image broke nothing visible in
+#: the test suite while breaking the first thing a visitor to the repository
+#: sees.
+LINKED_ASSET = re.compile(r"\]\(([^)#]+\.(?:png|svg|jpg|jpeg|html|yaml|yml|py))\)|src=\"([^\"]+)\"")
+
+
+@pytest.mark.parametrize("doc", DOCS, ids=lambda p: p.name)
+def test_linked_assets_exist(doc: Path) -> None:
+    """Images and pages the docs point at are really there."""
+    broken: list[str] = []
+    for match in LINKED_ASSET.finditer(_read(doc)):
+        target = match.group(1) or match.group(2)
+        if not target or target.startswith(("http", "data:", "mailto:")):
+            continue
+        # Prose showing the *shape* of a path rather than a real one.
+        if "..." in target or "<" in target:
+            continue
+        if not (doc.parent / target).resolve().exists():
+            if not (REPO_ROOT / target).resolve().exists():
+                broken.append(target)
+    assert not broken, f"{doc.name} points at missing assets: {broken}"
+
+
 def test_teams_delivery_claim_matches_reality() -> None:
     """The claim most likely to become a lie, in either direction.
 
