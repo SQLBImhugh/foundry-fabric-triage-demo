@@ -59,6 +59,42 @@ class ProbeResult:
     query: str = ""
 
 
+def _permission_hint(status: int, detail: str) -> str:
+    """Say what the caller has to go and change.
+
+    Power BI's refusals do not describe their own cause, and the two that stop
+    a detector look nothing like what is actually wrong:
+
+    * ``401 PowerBINotAuthorizedException`` arrives with an empty parameter bag
+      and no message. It usually means *Allow service principals to use Power
+      BI APIs* is enabled but scoped to a security group the caller is not in
+      -- nothing in the response mentions groups, tenant settings, or even
+      permissions.
+    * ``404 PowerBIEntityNotFound`` is what insufficient workspace permission
+      looks like. The dataset exists; the caller cannot see it. Reading it as
+      "wrong id" sends people to check GUIDs that were right all along.
+
+    Cost half an hour to work out once, against a real tenant. Writing it into
+    the error means nobody pays that twice.
+    """
+    if status == 401 and "NotAuthorized" in detail:
+        return (
+            "\nHint: the identity is probably outside the security group that "
+            "'Allow service principals to use Power BI APIs' is scoped to. "
+            "Check Admin portal -> Tenant settings, and note that Power BI can "
+            "take up to an hour to honour a new group membership."
+        )
+    if status == 404 and "EntityNotFound" in detail:
+        return (
+            "\nHint: this is what missing workspace permission looks like, not "
+            "a wrong id. executeQueries needs Build, which for an app-only "
+            "caller means workspace Contributor -- Power BI will not grant "
+            "Build on a single dataset to a service principal."
+        )
+    return ""
+
+
+
 def build_probe_dax(
     *,
     table: str,
@@ -304,7 +340,7 @@ class LiveSemanticHealthClient:
             )
             return ProbeResult(
                 ok=False,
-                error=f"HTTP {resp.status_code}: {detail}",
+                error=f"HTTP {resp.status_code}: {detail}{_permission_hint(resp.status_code, detail)}",
                 detector_fault=detector_fault,
                 query=query,
             )

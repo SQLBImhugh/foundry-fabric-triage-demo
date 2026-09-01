@@ -29,7 +29,11 @@ from triage_demo.store.semantic_health import (
     JsonFileSemanticHealthStore,
     ProbeState,
 )
-from triage_demo.tools.semantic_health import MockSemanticHealthClient, build_probe_dax
+from triage_demo.tools.semantic_health import (
+    MockSemanticHealthClient,
+    _permission_hint,
+    build_probe_dax,
+)
 
 NOW = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
 
@@ -558,3 +562,42 @@ async def test_the_detector_can_be_switched_off_in_configuration(runner) -> None
     runner.settings.silent_sweep_enabled = False
 
     assert await runner.silent_sweep(now=NOW) == []
+
+# ---------------------------------------------------------------------------
+# Platform refusals that do not describe themselves
+# ---------------------------------------------------------------------------
+
+
+def test_the_tenant_setting_refusal_says_what_to_change() -> None:
+    """401 PowerBINotAuthorizedException arrives with no message at all.
+
+    Measured against a real tenant: the body is the code, an empty parameter
+    bag, and nothing else. Without a hint the operator is told only that the
+    probe "could not run".
+    """
+    hint = _permission_hint(401, '{"error":{"code":"PowerBINotAuthorizedException"}}')
+
+    assert "security group" in hint
+    assert "Tenant settings" in hint
+
+
+def test_the_permission_refusal_is_not_mistaken_for_a_wrong_id() -> None:
+    """404 is what insufficient workspace permission looks like here.
+
+    The dataset exists and the ids are right; the caller cannot see it. Reading
+    it as "wrong id" sends people to check GUIDs that were never wrong.
+    """
+    hint = _permission_hint(404, '{"error":{"code":"PowerBIEntityNotFound"}}')
+
+    assert "not" in hint and "wrong id" in hint
+    assert "Contributor" in hint
+
+
+def test_no_hint_is_invented_for_an_unrelated_failure() -> None:
+    """A hint attached to the wrong error is worse than none.
+
+    It would send somebody to the admin portal over a throttling response.
+    """
+    assert _permission_hint(429, "TooManyRequests") == ""
+    assert _permission_hint(500, "InternalServerError") == ""
+    assert _permission_hint(401, "some other unauthorised thing") == ""
