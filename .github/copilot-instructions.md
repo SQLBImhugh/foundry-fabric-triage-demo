@@ -28,7 +28,7 @@ platform diverges from its documentation in several places, and
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 
-.\.venv\Scripts\python.exe -m pytest -q                  # 287 tests, must stay offline
+.\.venv\Scripts\python.exe -m pytest -q                  # the offline suite -- no network
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\triage-demo.exe run scenario1-transient
 .\.venv\Scripts\triage-demo.exe identity --check-scope   # who the agents are

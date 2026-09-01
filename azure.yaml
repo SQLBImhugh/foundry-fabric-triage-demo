@@ -4,7 +4,7 @@ name: foundry-fabric-triage-demo
 services:
     bi-request-triage:
         host: azure.ai.project
-        endpoint: https://bitriage-foundry-eus.services.ai.azure.com/api/projects/bi-request-triage
+        endpoint: ${AZURE_AI_PROJECT_ENDPOINT}
     bi-triage-controller:
         project: ./src
         host: azure.ai.agent
@@ -35,7 +35,7 @@ services:
             - name: TRIAGE_TOOL_MODE
               value: live
             - name: FOUNDRY_PROJECT_ENDPOINT
-              value: https://bitriage-foundry-eus.services.ai.azure.com/api/projects/bi-request-triage
+              value: ${AZURE_AI_PROJECT_ENDPOINT}
             - name: FOUNDRY_TRIAGE_AGENT_NAME
               value: bi-triage
             - name: FOUNDRY_DQ_AGENT_NAME
@@ -56,18 +56,18 @@ services:
             # and it is precisely what the agent identity removes everywhere
             # else. Injected from the azd environment, never committed.
             - name: GRAPH_TENANT_ID
-              value: edf144d9-f468-4b8e-8443-f51dadfbc4f9
+              value: ${AZURE_TENANT_ID}
             - name: GRAPH_CLIENT_ID
               value: ${GRAPH_CLIENT_ID}
             - name: GRAPH_CLIENT_SECRET
               value: ${GRAPH_CLIENT_SECRET}
             - name: GRAPH_MAILBOX
-              value: Mork@mngenvmcap777813.onmicrosoft.com
+              value: ${GRAPH_MAILBOX}
             # A mailbox the agent must NOT be able to read. Startup refuses to
             # ingest if this read succeeds, because app-only Mail.Read is
             # tenant-wide until Exchange scopes it.
             - name: GRAPH_CANARY_MAILBOX
-              value: mhugh@MngEnvMCAP777813.onmicrosoft.com
+              value: ${GRAPH_CANARY_MAILBOX}
             # Senders the agent will act on. Power BI's own no-reply addresses,
             # plus the presenter's address as a documented demo-injection route:
             # a live demo needs a way to make an alert arrive on cue, and
@@ -82,9 +82,9 @@ services:
             # thing from removing the check, and the filter continues to reject
             # everything else -- 10 messages on the last sweep.
             - name: GRAPH_SENDER_ALLOWLIST
-              value: no-reply-powerbi@microsoft.com,no-reply@powerbi.com,mhugh@MngEnvMCAP777813.onmicrosoft.com
+              value: ${GRAPH_SENDER_ALLOWLIST}
             - name: INCIDENT_TABLE_ENDPOINT
-              value: https://bitriagestore6343.table.core.windows.net/
+              value: ${INCIDENT_TABLE_ENDPOINT}
             - name: INCIDENT_TABLE_NAME
               value: incidents
             # Approval requests wait here and human decisions land here. It
@@ -116,7 +116,7 @@ services:
             # (Exchange does not accept it -- see the GRAPH_* note above. The
             # two services differ, and the demo says so rather than glossing it.)
             - name: POWERBI_TENANT_ID
-              value: edf144d9-f468-4b8e-8443-f51dadfbc4f9
+              value: ${AZURE_TENANT_ID}
             - name: POWERBI_WORKSPACE_ID
               value: 1002e59c-cd3c-4364-97b7-0a890221eec4
             - name: POWERBI_DATASET_ID

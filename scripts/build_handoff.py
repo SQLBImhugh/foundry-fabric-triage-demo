@@ -10,6 +10,7 @@ holding a credential -- see ``docs/handoff.md``.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -87,7 +88,92 @@ def _write(name: str, text: str) -> None:
     print(f"  {name}")
 
 
+#: A value that is obviously code rather than a credential. ``client_secret=
+#: self._client_secret`` is a parameter being passed and ``password=
+#: load_agent_identity(`` is a function call, not a secret being written down.
+#: A scanner that cannot tell the difference produces pages of noise, which is
+#: how it ends up ignored or switched off.
+CODE_LIKE = re.compile(r"^[A-Za-z_][\w.]*(\[[^\]]*\])?[(),]?$")
+
+#: Hosts reserved by RFC 2606 and RFC 6761 for documentation and testing. A URL
+#: pointing at one cannot be a live credential, because the domain cannot exist.
+RESERVED_HOST = re.compile(
+    r"^https?://(localhost|127\.0\.0\.1|\[::1\]|[\w.-]*example\.(com|net|org|invalid|test))",
+    re.I,
+)
+
+
+def scan_tree(root: Path) -> list[str]:
+    """Look for credentials in the files that would actually be published.
+
+    Scans **git-tracked files only**, because that is the question being asked:
+    would this leak if the repository were pushed? A local ``.env`` or
+    ``.azure/`` holds real secrets by design and is gitignored; flagging them
+    every run trains people to ignore the output.
+
+    Shared with the bundle builder so CI and the handoff step cannot drift into
+    checking different things. Skips the files whose whole purpose is to contain
+    realistic fake secrets -- the scanner's own patterns, its tests, and the
+    redaction corpus. A check that flags its own test fixtures is one somebody
+    turns off.
+    """
+    skip_files = {"build_handoff.py", "test_handoff_scanner.py", "test_redaction.py"}
+
+    try:
+        tracked = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=str(root), capture_output=True, text=True, check=True,
+        ).stdout.split("\0")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # No git available: fall back to walking the tree. Better to over-report
+        # than to report "clean" because the enumeration failed.
+        tracked = [str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()]
+
+    leaks: list[str] = []
+    for rel in tracked:
+        if not rel or Path(rel).name in skip_files or Path(rel).suffix in {".png", ".svg"}:
+            continue
+        path = root / rel
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+
+        for match in SECRET_ASSIGNMENT.finditer(text):
+            value = match.group("value")
+            if (
+                PLACEHOLDER.match(value)
+                or CODE_LIKE.match(value)
+                or RESERVED_HOST.match(value)
+            ):
+                continue
+            leaks.append(f"{rel}: {match.group(1)} has a value")
+        for pattern, label in ((WEBHOOK_URL, "webhook URL"), (BEARER_TOKEN, "bearer token")):
+            if pattern.search(text):
+                leaks.append(f"{rel}: {label}")
+
+    return list(dict.fromkeys(leaks))
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--scan-only",
+        action="store_true",
+        help="Scan the working tree for credentials and exit. Used by CI.",
+    )
+    args = parser.parse_args()
+
+    if args.scan_only:
+        leaks = scan_tree(REPO)
+        if leaks:
+            print("Possible credentials found:")
+            for leak in leaks:
+                print(f"  {leak}")
+            return 1
+        print("credential scan clean.")
+        return 0
+
     if OUT.exists():
         shutil.rmtree(OUT)
     OUT.mkdir(parents=True)

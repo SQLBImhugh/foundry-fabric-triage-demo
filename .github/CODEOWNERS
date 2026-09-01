@@ -1,0 +1,17 @@
+# Ownership is by area, so a change to policy enforcement or the action
+# allowlists always reaches someone who knows why the limits are what they are.
+*                           @SQLBImhugh
+
+# The safety surface. Changes here alter what the agent is permitted to do.
+/src/triage_demo/policy.py          @SQLBImhugh
+/src/triage_demo/approvals.py       @SQLBImhugh
+/src/triage_demo/tools/registry.py  @SQLBImhugh
+
+# Sourcing rule: playbook content must come from public documentation.
+/src/triage_demo/knowledge/ @SQLBImhugh
+
+# Customer-facing assets.
+/README.md                  @SQLBImhugh
+/TRANSPARENCY_FAQ.md        @SQLBImhugh
+/docs/                      @SQLBImhugh
+/walkthrough/               @SQLBImhugh
