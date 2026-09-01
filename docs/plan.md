@@ -371,11 +371,29 @@ Not a multiple of the demo. A different category of work.
 | **Auth** | Managed identity wherever possible; documented rotation for everything that cannot use it. Entra app secrets expire — a design that depends on one fails about a month after go-live |
 | **Observability** | Traces, alerts that fire, and a path from alert to a durable replay fixture |
 | **Regression** | Offline replay of real production runs. Prompt drift is invisible until something catches it |
-| **Human-in-the-loop** | The branch this demo omits: approval gates, timeouts, escalation, audit |
+| **Human-in-the-loop** | **Built.** Approval gates, expiry, single use, fail-closed, a Teams card with a working callback, and `triage-demo approve` — see `docs/architecture.md` |
 | **Failure modes** | Partial failure, duplicate delivery, out-of-order alerts, poison messages, the agent itself being down |
 
 **Weeks, not days**, and most of it is not agent work. That is the honest answer,
 and it lands better than a smaller number that turns out to be wrong.
+
+## Turning this into a solution accelerator
+
+The demo proves the control behaviour thoroughly and the failure taxonomy
+thinly: of eight scenarios, six are about what the controller refuses and two
+are about a failure type. Nine failure modes are recognised and three can now be
+acted on. For an accelerator the ratio that matters is recognised-to-actionable,
+so that is what the next work targets.
+
+| Scope | Document |
+|---|---|
+| Failures that send no alert at all — stale-but-successful refresh, row-count collapse, schema drift | [`scope-silent-failures.md`](scope-silent-failures.md) |
+| Tooling for the seven recognised playbooks that can currently only escalate | [`scope-playbook-tools.md`](scope-playbook-tools.md) |
+
+Both were scoped against Microsoft Learn rather than assumption, and both state
+plainly where no API exists. The silent-failure work matters most: `PERSONAS.html`
+names the analyst's problem as a report that looks normal and is a day stale, and
+that is precisely the case an alert-driven system cannot see.
 
 ## Review findings
 
