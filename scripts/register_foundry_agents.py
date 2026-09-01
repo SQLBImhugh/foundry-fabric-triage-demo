@@ -64,6 +64,38 @@ def _hash(obj: Any) -> str:
     ).hexdigest()[:12]
 
 
+def _strip_nulls(obj: Any) -> Any:
+    """Drop null-valued keys at every level.
+
+    The control plane echoes a definition back with its own defaults filled in
+    as nulls -- every function tool comes back carrying ``"strict": null``,
+    which nothing local ever sets. An earlier version of this stripped those
+    only at the top level of the definition, so the tool list always differed
+    and the triage agent was given a new version on *every* run of this script,
+    whether or not anything had changed. It reached version 9 that way while
+    the data quality agent, which has no tools, sat correctly at version 3.
+
+    That is worse than cosmetic. Version churn destroys the signal this script
+    exists to provide: if it always says "changed", nobody can tell when
+    something actually did.
+
+    Applied to both sides, so a key the server reports as null compares equal to
+    one that is absent. A key the server reports with a *real* value still
+    differs from one that is absent -- which is what catches a field being
+    removed locally while a stale version keeps serving it.
+    """
+    if isinstance(obj, dict):
+        return {k: _strip_nulls(v) for k, v in obj.items() if v is not None}
+    if isinstance(obj, list):
+        return [_strip_nulls(v) for v in obj]
+    return obj
+
+
+def definitions_match(local: dict[str, Any], remote: dict[str, Any]) -> bool:
+    """True when a registered definition already matches the local one."""
+    return _hash(_strip_nulls(local)) == _hash(_strip_nulls(remote))
+
+
 def _token() -> str:
     out = subprocess.run(
         ["az", "account", "get-access-token", "--resource", SCOPE,
@@ -169,17 +201,7 @@ def sync_agent(client, endpoint: str, name: str, definition: dict, *, dry_run: b
     if existing is not None:
         latest = (existing.get("versions") or {}).get("latest") or {}
         remote_def = latest.get("definition") or {}
-        # Compare the union of local and remote keys, ignoring server-added
-        # nulls. Comparing only local keys means REMOVING a field (e.g.
-        # dropping `temperature` for a reasoning model) looks like "in sync"
-        # and the stale version keeps serving - which is exactly the silent
-        # drift this script exists to prevent.
-        keys = set(definition) | {
-            k for k, v in remote_def.items() if v is not None
-        }
-        remote_cmp = {k: remote_def.get(k) for k in keys}
-        local_cmp = {k: definition.get(k) for k in keys}
-        if _hash(remote_cmp) == _hash(local_cmp):
+        if definitions_match(definition, remote_def):
             return f"  {name}: in sync (version {latest.get('version', '?')}, {local})"
 
     if dry_run:
