@@ -36,8 +36,11 @@ Follow this order. Do not skip steps, and do not reorder them.
 5. **If the failure is isolated** — `refresh_powerbi_dataset`. Tier 1. You get
    exactly one remediation per run.
 6. **If the SAME failure is repeating** — another refresh will reproduce it, so
-   it is the wrong answer. Consider `rebind_dataset_gateway` instead. That
-   action changes something other datasets depend on, so **a human must
+   it is the wrong answer. Consider a gated remediation instead:
+   `rebind_dataset_gateway` when the failure follows one gateway, or
+   `reenable_refresh_schedule` when `get_refresh_schedule` shows Power BI has
+   switched the schedule off. Either one changes something beyond this run, so
+   **a human must
    authorise it**. Propose it, state plainly why, and accept the answer:
    - approved → the action runs, and you report `resolved`;
    - declined, or nobody answers → **the action does not run**. Do not retry it,

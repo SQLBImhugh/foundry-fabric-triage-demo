@@ -168,6 +168,46 @@ TRIAGE_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "get_refresh_schedule",
+            "description": (
+                "Read the dataset's refresh schedule, including whether it is still "
+                "enabled. Power BI disables a schedule automatically after four "
+                "consecutive failures and never re-enables it, so a model whose cause "
+                "has been fixed can still be silently out of date. Check this whenever "
+                "the refresh history shows repeated failures."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reenable_refresh_schedule",
+            "description": (
+                "REMEDIATION REQUIRING HUMAN APPROVAL. Turn the dataset's refresh "
+                "schedule back on after Power BI disabled it. Only valid once the "
+                "most recent refresh has actually succeeded -- re-arming a schedule "
+                "whose cause is unfixed just fails again and disables it again. The "
+                "controller checks that and will refuse otherwise."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "justification": {
+                        "type": "string",
+                        "description": (
+                            "Why the schedule is safe to re-arm, citing the successful "
+                            "refresh that proves it."
+                        ),
+                    }
+                },
+                "required": ["justification"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "write_data_quality_flag",
             "description": (
                 "Record a data quality issue in the flag table. Flags the affected "
@@ -297,6 +337,10 @@ class ToolContext:
 
     workspace_id: str = ""
     dataset_id: str = ""
+    #: True / False / None where None means "not checked or unreadable".
+    #: Deliberately tri-state: treating unknown as enabled would let the
+    #: controller conclude there is nothing to re-arm.
+    schedule_enabled: bool | None = None
     approval_gate: ApprovalGate | None = None
     # How long a gated action waits for an answer. Carried on the context
     # because the dispatcher has no settings object, and hardcoding it here
@@ -380,6 +424,19 @@ class ToolDispatcher:
             raise
 
         if gated:
+            blocked_reason = await self._precondition_failure(name)
+            if blocked_reason is not None:
+                # Refused before the human is asked. Sending an approval request
+                # for something the controller will reject anyway trains people
+                # to click through them.
+                self._record(name, arguments, f"BLOCKED: {blocked_reason}", started, blocked=True)
+                logger.warning("Precondition blocked '%s': %s", name, blocked_reason)
+                return {
+                    "status": "blocked_by_policy",
+                    "reason": blocked_reason,
+                    "guidance": self._refusal_guidance(),
+                }
+
             allowed, approval_result = await self._seek_approval(name, arguments)
             if not allowed:
                 self._record(
@@ -510,6 +567,51 @@ class ToolDispatcher:
                 "outcome 'approval_denied'."
             ),
         }
+
+    async def _precondition_failure(self, name: str) -> str | None:
+        """Deterministic checks a gated action must pass before anyone is asked.
+
+        Enforced here rather than in the prompt, per the same reasoning as the
+        allowlist: a model can be argued out of a precondition, a controller
+        cannot. Returns a refusal reason, or None when the action may proceed.
+        """
+        if name != "reenable_refresh_schedule":
+            return None
+
+        ctx = self.ctx
+
+        # A refresh that succeeded during this run is the strongest evidence
+        # available: the thing that was failing now works.
+        outcome = ctx.remediation_outcome
+        if outcome is not None and getattr(outcome, "succeeded", False):
+            return None
+
+        # Otherwise the common real case: somebody fixed the cause by hand and
+        # ran a manual refresh, but nobody re-armed the schedule.
+        try:
+            history = await ctx.powerbi.get_refresh_history(
+                ctx.workspace_id, ctx.dataset_id, top=1
+            )
+        except Exception as exc:  # noqa: BLE001
+            return (
+                "Could not read the refresh history to confirm the dataset is "
+                f"healthy ({type(exc).__name__}), so the schedule was not re-armed."
+            )
+
+        latest = history[0] if history else None
+        if latest is None:
+            return (
+                "There is no refresh history for this dataset, so there is no "
+                "evidence the schedule is safe to re-arm."
+            )
+        if str(latest.get("status")) != "Completed":
+            return (
+                "The most recent refresh is "
+                f"'{latest.get('status')}', not 'Completed'. Re-arming the schedule "
+                "now would fail again and disable it again. Fix the cause, get one "
+                "successful refresh, then re-enable."
+            )
+        return None
 
     async def _acknowledge_decision(
         self, request: ApprovalRequest, record: ApprovalRecord
@@ -740,6 +842,43 @@ class ToolDispatcher:
             )
             return delivery
 
+        if name == "get_refresh_schedule":
+            schedule = await ctx.powerbi.get_refresh_schedule(
+                ctx.workspace_id, ctx.dataset_id
+            )
+            enabled = schedule.get("enabled")
+            ctx.schedule_enabled = enabled
+            return {
+                "status": "ok",
+                "enabled": enabled,
+                "days": schedule.get("days", []),
+                "times": schedule.get("times", []),
+                "guidance": (
+                    "Power BI disabled this schedule. Nothing re-enables it "
+                    "automatically, so the dataset will stay stale until somebody "
+                    "turns it back on -- but only re-enable it once a refresh has "
+                    "actually succeeded."
+                    if enabled is False
+                    else ""
+                ),
+            }
+
+        if name == "reenable_refresh_schedule":
+            outcome = await ctx.powerbi.set_refresh_schedule_enabled(
+                ctx.workspace_id, ctx.dataset_id, True
+            )
+            # Records the completed remediation, which is what
+            # ``_validate_outcome`` checks before it will accept "resolved".
+            # Without this the run does the work, succeeds, and is then
+            # downgraded to needs_human for lack of evidence it did anything.
+            ctx.remediation_outcome = outcome
+            ctx.schedule_enabled = True if outcome.succeeded else ctx.schedule_enabled
+            return {
+                "status": outcome.status,
+                "detail": outcome.detail,
+                "request_id": outcome.request_id,
+            }
+
         if name == "report_resolution":
             ctx.resolution = dict(args)
             return {"status": "recorded"}
@@ -780,6 +919,12 @@ def _impact_of(action: str, arguments: dict[str, Any]) -> str:
         return (
             f"Repoints this dataset to {target}. Other datasets bound to either "
             "gateway may be affected, and in-flight refreshes will fail."
+        )
+    if action == "reenable_refresh_schedule":
+        return (
+            "Turns the scheduled refresh back on. The dataset resumes refreshing "
+            "unattended on its existing schedule. If the underlying cause has "
+            "returned, Power BI will disable it again after four failures."
         )
     return "Modifies the live BI environment."
 

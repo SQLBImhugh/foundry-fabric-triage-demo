@@ -68,6 +68,11 @@ class Scenario:
     approval_reason: str = ""
     rogue_second_refresh: bool = False
     rogue_unknown_action: bool = False
+    #: Drive the scripted provider down the disabled-schedule branch. A flag
+    #: rather than an unconditional check so the other six scenarios keep their
+    #: exact tool sequences -- their expect blocks are the test.
+    check_schedule: bool = False
+    schedule_enabled: bool = True
     reset_flags: bool = True
     reset_incidents: bool = True
     repeat: int = 1
@@ -92,6 +97,8 @@ class Scenario:
             approval_reason=approval.get("reason", ""),
             rogue_second_refresh=bool(provider.get("rogue_second_refresh", False)),
             rogue_unknown_action=bool(provider.get("rogue_unknown_action", False)),
+            check_schedule=bool(provider.get("check_schedule", False)),
+            schedule_enabled=bool(pbi.get("schedule_enabled", True)),
             **raw,
         )
 
@@ -222,6 +229,7 @@ class TriageRunner:
         return MockPowerBIClient(
             refresh_result=(scenario.refresh_result if scenario else "Completed"),
             history=list(scenario.refresh_history) if scenario else [],
+            schedule_enabled=(scenario.schedule_enabled if scenario else True),
         )
 
     def build_approval_channel(self):
@@ -361,6 +369,7 @@ class TriageRunner:
                 {
                     "rogue_second_refresh": scenario.rogue_second_refresh,
                     "rogue_unknown_action": scenario.rogue_unknown_action,
+                    "check_schedule": scenario.check_schedule,
                 }
                 if scenario and self.settings.triage_provider_mode == "mock"
                 else {}

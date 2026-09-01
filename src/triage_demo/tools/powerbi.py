@@ -46,6 +46,12 @@ class PowerBIClient(Protocol):
     async def rebind_gateway(
         self, workspace_id: str, dataset_id: str, gateway_id: str
     ) -> RefreshOutcome: ...
+    async def get_refresh_schedule(
+        self, workspace_id: str, dataset_id: str
+    ) -> dict[str, Any]: ...
+    async def set_refresh_schedule_enabled(
+        self, workspace_id: str, dataset_id: str, enabled: bool
+    ) -> RefreshOutcome: ...
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +67,10 @@ class MockPowerBIClient:
     history: list[dict[str, Any]] = field(default_factory=list)
     latency_ms: int = 400
     calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    # Power BI disables a refresh schedule itself after four consecutive
+    # failures. Nothing re-arms it, so the report quietly stops updating even
+    # after somebody fixes the underlying cause.
+    schedule_enabled: bool = True
 
     async def refresh_dataset(self, workspace_id: str, dataset_id: str) -> RefreshOutcome:
         self.calls.append(
@@ -105,6 +115,30 @@ class MockPowerBIClient:
             request_id=f"mock-rebind-{len(self.calls)}",
             duration_ms=self.latency_ms,
             detail=f"Dataset rebound to gateway {gateway_id}.",
+        )
+
+    async def get_refresh_schedule(
+        self, workspace_id: str, dataset_id: str
+    ) -> dict[str, Any]:
+        self.calls.append(("get_refresh_schedule", {}))
+        return {
+            "enabled": self.schedule_enabled,
+            "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+            "times": ["06:00"],
+            "localTimeZoneId": "UTC",
+        }
+
+    async def set_refresh_schedule_enabled(
+        self, workspace_id: str, dataset_id: str, enabled: bool
+    ) -> RefreshOutcome:
+        self.calls.append(("set_refresh_schedule_enabled", {"enabled": enabled}))
+        await asyncio.sleep(self.latency_ms / 1000)
+        self.schedule_enabled = enabled
+        return RefreshOutcome(
+            status="Completed",
+            request_id=f"mock-schedule-{len(self.calls)}",
+            duration_ms=self.latency_ms,
+            detail=f"Refresh schedule {'enabled' if enabled else 'disabled'}.",
         )
 
 
@@ -321,6 +355,67 @@ class LivePowerBIClient:
                 duration_ms=int((time.time() - started) * 1000),
                 detail=(
                     f"Dataset rebound to gateway {gateway_id}."
+                    if ok
+                    else f"HTTP {resp.status_code}: {resp.text[:400]}"
+                ),
+            )
+
+    async def get_refresh_schedule(
+        self, workspace_id: str, dataset_id: str
+    ) -> dict[str, Any]:
+        """Read the schedule, including whether Power BI has disabled it.
+
+        Power BI switches a refresh schedule off by itself after four
+        consecutive failures. Nothing switches it back on, so a model can be
+        fixed and still never refresh again -- which presents to the business
+        as a report that is simply, quietly, always a day behind.
+        """
+        _require_ids(workspace_id, dataset_id)
+        import httpx
+
+        token = await self._get_token()
+        url = f"{_API}/groups/{workspace_id}/datasets/{dataset_id}/refreshSchedule"
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+            if resp.status_code >= 400:
+                logger.warning(
+                    "Could not read refresh schedule: HTTP %s %s",
+                    resp.status_code,
+                    resp.text[:200],
+                )
+                # Unknown is not the same as enabled. Returning True here would
+                # let the controller conclude there is nothing to fix.
+                return {"enabled": None, "error": f"HTTP {resp.status_code}"}
+            return resp.json()
+
+    async def set_refresh_schedule_enabled(
+        self, workspace_id: str, dataset_id: str, enabled: bool
+    ) -> RefreshOutcome:
+        """Turn the refresh schedule on or off.
+
+        Reached only after a human has approved it and the controller has
+        confirmed the most recent refresh actually succeeded. Re-arming a
+        schedule whose cause is unfixed just fails four more times and disables
+        it again, having burned a remediation and told somebody it was handled.
+        """
+        _require_ids(workspace_id, dataset_id)
+        import httpx
+
+        started = time.time()
+        token = await self._get_token()
+        url = f"{_API}/groups/{workspace_id}/datasets/{dataset_id}/refreshSchedule"
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.patch(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                json={"value": {"enabled": enabled}},
+            )
+            ok = resp.status_code in (200, 202)
+            return RefreshOutcome(
+                status="Completed" if ok else "Failed",
+                duration_ms=int((time.time() - started) * 1000),
+                detail=(
+                    f"Refresh schedule {'enabled' if enabled else 'disabled'}."
                     if ok
                     else f"HTTP {resp.status_code}: {resp.text[:400]}"
                 ),

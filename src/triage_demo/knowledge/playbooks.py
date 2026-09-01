@@ -110,11 +110,27 @@ PLAYBOOKS: list[Playbook] = [
             "runs, so no further failure alert is raised."
         ),
         retry_useful=False,
-        suggested_tier="needs_human",
+        # Was needs_human, correctly, while nothing could act on it. There is now
+        # a bounded, approval-gated action -- and the controller refuses that
+        # action unless the most recent refresh completed -- which is tier 2 by
+        # this repo's own definition: real, but not safe to fix unattended.
+        suggested_tier="tier_2",
         guidance=(
-            "An on-demand refresh does not re-enable the schedule. Someone has to fix the "
-            "underlying cause and turn the schedule back on in semantic model settings. "
-            "Escalate, and say plainly that the schedule is off."
+            "An on-demand refresh does not re-enable the schedule -- the two are "
+            "separate. Fix the underlying cause, get one successful refresh, then "
+            "re-arm the schedule with `reenable_refresh_schedule`. The controller "
+            "refuses that action until the most recent refresh reads 'Completed', "
+            "because re-arming a still-broken schedule just fails four more times "
+            "and disables it again. If no successful refresh can be obtained, "
+            "escalate and say plainly that the schedule is off.\n\n"
+            "A refresh that COMPLETED after the failures is proof the cause is "
+            "resolved, whatever the original error said -- a refresh cannot "
+            "succeed with missing or invalid credentials, an unreachable gateway "
+            "or a broken source. Do not escalate for a credential fix that the "
+            "history already shows has happened; that leaves the report stale for "
+            "no reason. The scheduled-failure counter and the health of the model "
+            "are different questions: the counter governs deactivation, a "
+            "completed refresh governs whether it is safe to re-arm."
         ),
         watch_out=(
             "Count only refreshes with refreshType 'Scheduled' when judging how close the "

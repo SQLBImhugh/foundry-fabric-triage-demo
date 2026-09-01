@@ -35,6 +35,9 @@ logger = logging.getLogger("triage.store")
 _ACTION_TYPES: dict[str, str] = {
     "refresh_powerbi_dataset": "nondeterministic_retry",
     "rebind_dataset_gateway": "known_workaround",
+    # Restoring a schedule the platform disabled. Deterministic: the state it
+    # produces is known exactly, unlike a retry, which may or may not work.
+    "reenable_refresh_schedule": "deterministic_fix",
     "write_data_quality_flag": "flag_only",
     "": "none",
 }

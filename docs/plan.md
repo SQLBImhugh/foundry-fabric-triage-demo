@@ -83,7 +83,7 @@ Everything runs with no tenant, no Azure login, no network.
 | Scripted / Azure OpenAI / Foundry providers | `src/triage_demo/providers/` |
 | Incident store with occurrence counting | `src/triage_demo/store/incidents.py` |
 | OTel GenAI spans with no-op fallback | `src/triage_demo/observability.py` |
-| 7 scenarios with machine-checked assertions | `scenarios/` |
+| 8 scenarios with machine-checked assertions | `scenarios/` |
 | CLI with live event rendering | `src/triage_demo/cli.py` |
 | 287 tests | `tests/` |
 
@@ -175,7 +175,7 @@ one of two options.
 prompt or tool changes. Re-register or the demo silently runs the previous
 definition. It is on the pre-demo checklist.
 
-**Exit criteria (met)**: 7/7 scenarios pass with `TRIAGE_PROVIDER_MODE=foundry`.
+**Exit criteria (met)**: every scenario then defined passed with `TRIAGE_PROVIDER_MODE=foundry`.
 
 ---
 
@@ -243,7 +243,7 @@ readable from another machine, which proves it authenticated as itself.
 
 ### Phase 7 — Rehearsal ✅ COMPLETE
 
-- [x] All 7 scenarios pass live, and offline
+- [x] All scenarios pass live, and offline
 - [x] Suppression, refusal, and both approval directions rehearsed
 - [x] Reset procedure verified, including the durable table
 - [x] Customer walkthrough captured — `walkthrough/WALKTHROUGH.html`

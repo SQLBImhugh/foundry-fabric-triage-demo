@@ -29,6 +29,7 @@ REMEDIATION_ACTIONS: frozenset[str] = frozenset(
     {
         "refresh_powerbi_dataset",
         "rebind_dataset_gateway",
+        "reenable_refresh_schedule",
     }
 )
 
@@ -43,6 +44,12 @@ REMEDIATION_ACTIONS: frozenset[str] = frozenset(
 APPROVAL_REQUIRED_ACTIONS: frozenset[str] = frozenset(
     {
         "rebind_dataset_gateway",
+        # Re-arming a schedule is small in itself and large in consequence: it
+        # hands an unattended job back to a platform that already switched it
+        # off once. The controller additionally refuses it unless the most
+        # recent refresh succeeded, so the human is being asked to authorise a
+        # restoration, not to guess whether the cause was fixed.
+        "reenable_refresh_schedule",
     }
 )
 
@@ -64,6 +71,7 @@ DIAGNOSTIC_ACTIONS: frozenset[str] = frozenset(
     {
         "get_request_context",
         "get_dataset_refresh_history",
+        "get_refresh_schedule",
         "check_duplicates",
         "get_known_incidents",
         "consult_data_quality_agent",

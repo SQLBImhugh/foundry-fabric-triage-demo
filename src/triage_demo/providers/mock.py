@@ -63,6 +63,11 @@ class ScriptedProvider:
     #: When True, proposes an action that is not on the allowlist at all.
     rogue_unknown_action: bool = False
 
+    #: When True, checks the refresh schedule and re-arms it if Power BI
+    #: disabled it. Off by default so the other scenarios keep their exact
+    #: tool sequences.
+    check_schedule: bool = False
+
     turns: list[str] = field(default_factory=list)
 
     async def complete(
@@ -193,6 +198,74 @@ class ScriptedProvider:
                 {"top": 5},
                 "Checking history to confirm this is a one-off.",
             )
+
+        # The schedule is a separate switch from the data. Power BI turns it off
+        # after four consecutive failures and never turns it back on, so a model
+        # can be healthy and still never refresh again -- and because no
+        # scheduled run happens, no further alert is raised either.
+        if self.check_schedule:
+            if "get_refresh_schedule" not in called:
+                return (
+                    "get_refresh_schedule",
+                    {},
+                    "Checking whether the refresh schedule is still switched on.",
+                )
+
+            schedule = results.get("get_refresh_schedule", {})
+            if schedule.get("enabled") is False and "reenable_refresh_schedule" not in called:
+                return (
+                    "reenable_refresh_schedule",
+                    {
+                        "justification": (
+                            "Power BI disabled the schedule after consecutive failures. "
+                            "The most recent refresh completed successfully, so the "
+                            "cause is resolved and the schedule can be re-armed."
+                        ),
+                    },
+                    "Proposing to re-arm the schedule. This needs a human decision.",
+                )
+
+            if "reenable_refresh_schedule" in called:
+                restored = results.get("reenable_refresh_schedule", {})
+                worked = str(restored.get("status")) == "Completed"
+                if "notify_teams" not in called:
+                    return (
+                        "notify_teams",
+                        {
+                            "title": (
+                                "Refresh schedule re-armed"
+                                if worked
+                                else "Refresh schedule still disabled"
+                            ),
+                            "outcome": "resolved" if worked else "needs_human",
+                            "action_taken": (
+                                "Re-enabled the scheduled refresh after approval."
+                                if worked
+                                else "None. The schedule remains off."
+                            ),
+                            "detail": str(
+                                restored.get("reason") or restored.get("detail") or ""
+                            ),
+                        },
+                        "Reporting the schedule outcome.",
+                    )
+                return (
+                    "report_resolution",
+                    {
+                        "outcome": "resolved" if worked else "needs_human",
+                        "summary": (
+                            "The schedule was disabled by Power BI after repeated "
+                            "failures. The cause is fixed and the schedule is back on."
+                            if worked
+                            else "The schedule is disabled and was not re-armed."
+                        ),
+                        "root_cause": (
+                            "Power BI deactivated the refresh schedule after "
+                            "consecutive failures; nothing re-enables it automatically."
+                        ),
+                    },
+                    "Reporting the outcome.",
+                )
 
         if self.rogue_unknown_action and "delete_dataset" not in called:
             return (
