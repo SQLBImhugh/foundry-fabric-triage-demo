@@ -28,14 +28,21 @@ _API = "https://api.powerbi.com/v1.0/myorg"
 
 @dataclass
 class RefreshOutcome:
-    status: str  # "Completed" | "Failed" | "Unknown"
+    status: str  # "Completed" | "Failed" | "Throttled" | "Unknown"
     request_id: str = ""
     duration_ms: int = 0
     detail: str = ""
+    #: Seconds the service asked us to wait, from the 429 Retry-After header.
+    #: Zero means it did not say, not "retry immediately".
+    retry_after_seconds: int = 0
 
     @property
     def succeeded(self) -> bool:
         return self.status == "Completed"
+
+    @property
+    def throttled(self) -> bool:
+        return self.status == "Throttled"
 
 
 class PowerBIClient(Protocol):
@@ -71,6 +78,9 @@ class MockPowerBIClient:
     # failures. Nothing re-arms it, so the report quietly stops updating even
     # after somebody fixes the underlying cause.
     schedule_enabled: bool = True
+    #: What a throttled service asks for. Only used when refresh_result is
+    #: "Throttled"; zero means the service did not say.
+    retry_after_seconds: int = 0
 
     async def refresh_dataset(self, workspace_id: str, dataset_id: str) -> RefreshOutcome:
         self.calls.append(
@@ -81,10 +91,18 @@ class MockPowerBIClient:
             status=self.refresh_result,
             request_id=f"mock-refresh-{len(self.calls)}",
             duration_ms=self.latency_ms,
+            retry_after_seconds=(
+                self.retry_after_seconds if self.refresh_result == "Throttled" else 0
+            ),
             detail=(
                 "Refresh completed successfully."
                 if self.refresh_result == "Completed"
-                else f"Refresh ended with status {self.refresh_result}."
+                else (
+                    "The capacity rejected the refresh because it has exceeded its "
+                    "resource limits."
+                    if self.refresh_result == "Throttled"
+                    else f"Refresh ended with status {self.refresh_result}."
+                )
             ),
         )
         # Reflect the refresh in history so a follow-up read is consistent.
@@ -268,6 +286,27 @@ class LivePowerBIClient:
             }
 
             resp = await client.post(base, headers=headers, json={"notifyOption": "NoNotification"})
+            if resp.status_code == 429:
+                # Throttling is not failure. Reporting it as failure would send
+                # the agent looking for a fault in a model that is fine, and
+                # invites the one response that makes a saturated capacity
+                # worse: retrying into it.
+                try:
+                    retry_after = int(resp.headers.get("Retry-After", "0"))
+                except (TypeError, ValueError):
+                    retry_after = 0
+                logger.warning(
+                    "Refresh throttled by capacity; Retry-After=%s", retry_after or "(absent)"
+                )
+                return RefreshOutcome(
+                    status="Throttled",
+                    duration_ms=int((time.time() - started) * 1000),
+                    retry_after_seconds=retry_after,
+                    detail=(
+                        "The capacity rejected the refresh because it has exceeded its "
+                        f"resource limits. {resp.text[:300]}"
+                    ),
+                )
             if resp.status_code not in (200, 202):
                 return RefreshOutcome(
                     status="Failed",

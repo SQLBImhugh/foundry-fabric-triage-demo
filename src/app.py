@@ -215,6 +215,12 @@ class TriageControllerAgent(BaseAgent):
         """Triage everything new in the alerts mailbox."""
         inbox = self._runner.build_inbox()
 
+        # Work the agent already agreed to do, whose window has now passed.
+        # Done first: a retry that succeeds closes its incident, so a fresh
+        # alert for the same signature arriving in this sweep is judged against
+        # the current state rather than a stale open one.
+        retried = await self._runner.drain_due_retries()
+
         # Say which identity we are actually presenting. A container can hold a
         # valid token for the wrong principal, which surfaces as a 401 and
         # looks like a missing permission rather than an identity mix-up.
@@ -250,6 +256,8 @@ class TriageControllerAgent(BaseAgent):
 
         requests = await inbox.fetch(limit=10)
         if not requests:
+            if retried:
+                return "No new alerts. Deferred retries performed:\n" + "\n".join(retried)
             return "No new alerts."
 
         lines: list[str] = []
@@ -260,7 +268,10 @@ class TriageControllerAgent(BaseAgent):
             # crash after marking would lose it silently.
             inbox.mark_processed(request.request_id, received_at=request.received_at)
             lines.append(f"- {request.subject or '(no subject)'}: {_summarise(artifacts)}")
-        return f"Triaged {len(requests)} alert(s).\n" + "\n".join(lines)
+        summary = f"Triaged {len(requests)} alert(s).\n" + "\n".join(lines)
+        if retried:
+            summary += "\nDeferred retries performed:\n" + "\n".join(retried)
+        return summary
 
 
 def _summarise(artifacts: Any) -> str:

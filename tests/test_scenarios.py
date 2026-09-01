@@ -38,6 +38,7 @@ def test_every_scenario_file_parses(repo_root) -> None:
 
         "scenario6-approval-denied",
         "scenario7-schedule-reenable",
+        "scenario8-capacity-backoff",
     ],
 )
 async def test_scenario_meets_its_expectations(

@@ -52,6 +52,7 @@ _VALID_OUTCOMES = {
     "flagged_data_quality",
     "duplicate_suppressed",
     "approval_denied",
+    "deferred_retry",
     "needs_human",
     "declared_failed",
 }
@@ -73,6 +74,7 @@ class TriageDeps:
     known_incident: Any = None
     approval_gate: Any = None
     approval_timeout_seconds: int = 300
+    retries: Any = None
 
 
 class TriageAgent:
@@ -136,6 +138,7 @@ class TriageAgent:
             dataset_id=deps.dataset_id or request.dataset_id or "",
             approval_gate=deps.approval_gate,
             approval_timeout_seconds=deps.approval_timeout_seconds,
+            retries=deps.retries,
         )
         dispatcher = ToolDispatcher(ctx, dq_agent=self._dq_agent)
 
@@ -360,6 +363,16 @@ class TriageAgent:
                     summary,
                     "Agent reported success, but no remediation completed successfully.",
                 )
+
+        if outcome == "deferred_retry" and not ctx.retry_deferred:
+            # "I have scheduled this for later" is a promise. Accepting it
+            # without a row in the retry store means the work is neither done
+            # nor queued, and the incident reads as handled.
+            return self._downgrade(
+                "deferred_retry",
+                summary,
+                "Agent reported a deferred retry, but no retry was scheduled.",
+            )
 
         if outcome == "flagged_data_quality":
             finding = ctx.dq_finding

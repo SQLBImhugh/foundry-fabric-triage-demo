@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,7 @@ from triage_demo.signature import compute_signature
 from triage_demo.store.approvals import JsonFileApprovalChannel
 from triage_demo.store.incidents import IncidentStore, JsonFileIncidentStore
 from triage_demo.store.processed import JsonFileProcessedLog
+from triage_demo.store.retries import JsonFileRetryStore
 from triage_demo.tools.dataset import DatasetSource
 from triage_demo.tools.flags import DataQualityFlagTable
 from triage_demo.tools.inbox import GraphInbox, MockInbox
@@ -62,6 +64,7 @@ class Scenario:
     dataset_id: str = "00000000-0000-0000-0000-000000000000"
     refresh_result: str = "Completed"
     refresh_history: list[dict[str, Any]] = field(default_factory=list)
+    retry_after_seconds: int = 0
     #: auto_approve | auto_deny | timeout | none
     approval: str = "auto_approve"
     approver: str = "m.hughes@contoso.com"
@@ -92,6 +95,7 @@ class Scenario:
             dataset_id=pbi.get("dataset_id", cls.dataset_id),
             refresh_result=pbi.get("refresh_result", "Completed"),
             refresh_history=list(pbi.get("refresh_history") or []),
+            retry_after_seconds=int(pbi.get("retry_after_seconds", 0)),
             approval=approval.get("mode", "auto_approve"),
             approver=approval.get("approver", "m.hughes@contoso.com"),
             approval_reason=approval.get("reason", ""),
@@ -125,6 +129,7 @@ class TriageRunner:
         store: IncidentStore | None = None,
         on_event: EventHook | None = None,
         flag_table_path: Path | None = None,
+        retry_store_path: Path | None = None,
     ):
         self.settings = settings
         self.base_dir = Path(base_dir)
@@ -133,6 +138,9 @@ class TriageRunner:
         self.flag_table = DataQualityFlagTable(
             flag_table_path or (self.base_dir / "runs" / "dq_flags.csv")
         )
+        # Built once per runner rather than per run: a deferral written by one
+        # run has to be visible to the precondition check of the next.
+        self.retries = self.build_retry_store(retry_store_path)
         self._teams = None
 
     # --- inbox -------------------------------------------------------------
@@ -230,7 +238,121 @@ class TriageRunner:
             refresh_result=(scenario.refresh_result if scenario else "Completed"),
             history=list(scenario.refresh_history) if scenario else [],
             schedule_enabled=(scenario.schedule_enabled if scenario else True),
+            retry_after_seconds=(scenario.retry_after_seconds if scenario else 0),
         )
+
+    async def drain_due_retries(self, *, now: datetime | None = None) -> list[str]:
+        """Perform the retries whose window has passed.
+
+        Deliberately deterministic and model-free. The decision was already
+        made and recorded -- "refresh this dataset after T" -- so re-running
+        triage would ask a model to re-derive a conclusion that is already on
+        disk, and would trip the known-incident check and suppress the very
+        work it was sent to do.
+
+        Nothing drains itself. Without this, ``defer_refresh_retry`` writes a
+        row, reports scheduled work, and the retry never happens.
+
+        ``now`` is injectable so the wait can be tested without waiting, the
+        same reason :class:`PolicyLedger` takes a clock.
+        """
+        if self.retries is None:
+            return []
+
+        due = self.retries.due(now=now)
+        if not due:
+            return []
+
+        lines: list[str] = []
+        powerbi = self.build_powerbi()
+
+        for row in due:
+            signature = str(row.get("signature", ""))
+            report = str(row.get("report_name") or "the dataset")
+            try:
+                outcome = await powerbi.refresh_dataset(
+                    str(row.get("workspace_id", "")), str(row.get("dataset_id", ""))
+                )
+            except Exception as exc:  # noqa: BLE001 - a failed retry is data
+                logger.warning(
+                    "Deferred retry for %s raised %s", signature, type(exc).__name__
+                )
+                self.retries.complete(signature, outcome=f"error:{type(exc).__name__}")
+                lines.append(f"- {report}: retry failed ({type(exc).__name__})")
+                continue
+
+            if outcome.succeeded:
+                self.retries.complete(signature, outcome="resolved")
+                # Close the incident too. An incident left open after the thing
+                # was fixed keeps suppressing new alerts, so a genuine
+                # recurrence is silently swallowed.
+                open_incident = self.store.find_open(signature)
+                if open_incident is not None:
+                    self.store.mark(
+                        open_incident.id,
+                        "resolved",
+                        "Deferred retry completed after the throttling window.",
+                    )
+                lines.append(f"- {report}: deferred retry completed")
+            elif outcome.throttled:
+                # Still throttled. Back off further, or give up and say so --
+                # the store enforces the attempt limit.
+                again = self.retries.defer(
+                    signature=signature,
+                    request_id=str(row.get("request_id", "")),
+                    workspace_id=str(row.get("workspace_id", "")),
+                    dataset_id=str(row.get("dataset_id", "")),
+                    report_name=report,
+                    reason="Still throttled when the retry window arrived.",
+                    retry_after_seconds=outcome.retry_after_seconds,
+                )
+                if again.get("status") == "pending":
+                    lines.append(
+                        f"- {report}: still throttled, retry {again.get('attempts')} "
+                        f"due {again.get('due_at')}"
+                    )
+                else:
+                    lines.append(
+                        f"- {report}: still throttled after the deferral limit; "
+                        "needs a human"
+                    )
+            else:
+                self.retries.complete(signature, outcome=f"failed:{outcome.status}")
+                lines.append(f"- {report}: retry ran and failed ({outcome.status})")
+
+        logger.info("Drained %d due retry/retries", len(due))
+        return lines
+
+    def build_retry_store(self, path: Path | None = None):
+        """Where postponed retries live.
+
+        Durable for the same reason as the others: the run that defers and the
+        sweep that performs it are different processes. If this is in-memory on
+        a hosted agent, every deferred retry is dropped the moment the run ends
+        -- the agent would report scheduled work that can never happen.
+
+        An explicit ``path`` forces the file-backed store, which is how tests
+        stay isolated from each other and from a developer's real runs.
+        """
+        if path is not None:
+            return JsonFileRetryStore(path)
+
+        endpoint = self.settings.incident_table_endpoint
+        if not endpoint:
+            return JsonFileRetryStore(self.base_dir / "runs" / "retries.json")
+
+        from triage_demo.store.retries import AzureTableRetryStore
+
+        store = AzureTableRetryStore(
+            endpoint=endpoint, table_name=self.settings.retry_table_name
+        )
+        if not store.is_durable:
+            logger.error(
+                "Retry store at %s is not durable; deferred retries will be dropped "
+                "rather than performed",
+                endpoint,
+            )
+        return store
 
     def build_approval_channel(self):
         """Where approval requests wait and decisions land.
@@ -316,6 +438,12 @@ class TriageRunner:
             self.flag_table.reset()
         if scenario.reset_incidents and not keep_incidents:
             self.store.reset()
+            # Deferred retries are run state too. Leaving them behind means the
+            # next scenario inherits an open backoff window and its refresh is
+            # refused for a reason belonging to the previous run -- and repeated
+            # rehearsals eventually exhaust the attempt limit.
+            if self.retries is not None:
+                self.retries.reset()
 
     async def run_scenario(
         self, scenario: Scenario, *, keep_incidents: bool = False
@@ -415,6 +543,7 @@ class TriageRunner:
             known_incident=known,
             approval_gate=self.build_approval_gate(scenario),
             approval_timeout_seconds=int(self.settings.approval_timeout_seconds),
+            retries=self.retries,
         )
 
         flags_before = self.flag_table.row_count

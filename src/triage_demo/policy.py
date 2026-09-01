@@ -63,6 +63,11 @@ REPORTING_ACTIONS: frozenset[str] = frozenset(
         "write_data_quality_flag",
         "notify_teams",
         "report_resolution",
+        # Postponing work is not doing it. Deferring writes a row to the retry
+        # store and touches nothing in Power BI, so it belongs here -- and it
+        # must not charge the remediation budget, or the deferred retry could
+        # never be performed when its window arrives.
+        "defer_refresh_retry",
     }
 )
 

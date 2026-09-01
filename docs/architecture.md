@@ -238,6 +238,40 @@ needs. It goes straight to the notifier rather than through `notify_teams`: that
 path is deduplicated per incident, so routing an acknowledgement through it
 would consume the incident's one announcement and silence the real outcome.
 
+## Capacity throttling and deferred retries
+
+Throttling is the one failure in the set where the obvious fix is actively
+harmful. The capacity has already exceeded its resource limits, so a retry adds
+load to the cause; across several datasets at once that turns contention into an
+outage caused by the system meant to be helping.
+
+`defer_refresh_retry` schedules the work instead of doing it. It is a
+**reporting** action, not a remediation: it touches nothing in Power BI, and it
+must not charge the remediation budget — if postponing spent the run's one
+remediation, the retry could never be performed when its window arrived.
+
+**The controller refuses an immediate refresh while a deferral is open**, in
+`ToolDispatcher._precondition_failure`. A model that is merely told not to retry
+can be argued out of it. That refusal also does not spend the budget: any action
+with a precondition has its remediation charge deferred until the check passes,
+for the same reason an approval denial does not.
+
+**Bounded.** Each deferral doubles the wait (15, 30, 60 minutes) and increments
+an attempt count. After three the row is marked `exhausted` and the outcome
+becomes `needs_human` — repeated throttling is a capacity scheduling problem, not
+a retry problem. An agent that defers indefinitely has invented a patient way of
+doing nothing.
+
+**Something has to drain it.** `TriageRunner.drain_due_retries()` runs at the
+start of every sweep, before the mailbox is read, so a retry that succeeds closes
+its incident before a fresh alert for the same signature is judged against it.
+The drain is deterministic and model-free: the decision is already on disk, and
+re-running triage would trip the known-incident check and suppress the very work
+it was sent to do. A successful retry marks the incident resolved — an incident
+left open after the fix keeps suppressing genuine recurrences.
+
+`triage-demo retries` shows what is postponed; `--drain` performs what is due.
+
 ## The incident store
 
 Every terminal outcome is persisted:

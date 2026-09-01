@@ -20,6 +20,7 @@ TerminalOutcome = Literal[
     "flagged_data_quality",  # DQ issue found; flagged + notified, no auto-fix
     "duplicate_suppressed",  # known open incident; occurrence counted, no action
     "approval_denied",       # agent proposed a bounded fix; a human said no
+    "deferred_retry",        # throttled; retry scheduled for later, nothing done yet
     "needs_human",           # agent stopped without resolving (no crash)
     "declared_failed",       # agent explicitly declared it unresolvable
     "agent_crashed",         # unhandled exception in the loop

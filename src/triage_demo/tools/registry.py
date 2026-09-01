@@ -39,6 +39,16 @@ from triage_demo.tools.teams import ResolutionSummary, TeamsNotifier
 
 logger = logging.getLogger("triage.tools")
 
+# Actions whose dispatch is subject to a deterministic precondition. Their
+# remediation charge is deferred until the check passes, so being refused never
+# costs the run its one remediation.
+_PRECONDITIONED_ACTIONS: frozenset[str] = frozenset(
+    {
+        "refresh_powerbi_dataset",
+        "reenable_refresh_schedule",
+    }
+)
+
 
 # ---------------------------------------------------------------------------
 # Function-calling schemas
@@ -208,6 +218,40 @@ TRIAGE_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "defer_refresh_retry",
+            "description": (
+                "Schedule this dataset's refresh to be retried later instead of now. "
+                "Use when the failure is capacity throttling: the capacity is already "
+                "over its limits, so retrying immediately adds load to the thing that "
+                "is overloaded and makes the contention worse. This does not touch "
+                "Power BI -- it records the work so a later sweep performs it once the "
+                "window has passed. It does not spend the remediation budget."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        "description": (
+                            "Why the retry is being postponed, citing the throttling "
+                            "evidence."
+                        ),
+                    },
+                    "retry_after_seconds": {
+                        "type": "integer",
+                        "description": (
+                            "How long the service asked us to wait, if it said. Omit "
+                            "or use 0 to let the controller apply its own backoff."
+                        ),
+                    },
+                },
+                "required": ["reason"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "write_data_quality_flag",
             "description": (
                 "Record a data quality issue in the flag table. Flags the affected "
@@ -260,6 +304,7 @@ TRIAGE_TOOLS: list[dict[str, Any]] = [
                             "flagged_data_quality",
                             "duplicate_suppressed",
                             "approval_denied",
+                            "deferred_retry",
                             "needs_human",
                             "declared_failed",
                         ],
@@ -342,6 +387,10 @@ class ToolContext:
     #: controller conclude there is nothing to re-arm.
     schedule_enabled: bool | None = None
     approval_gate: ApprovalGate | None = None
+    #: Where postponed retries live. None means deferring is unavailable, which
+    #: the tool reports rather than silently dropping the work.
+    retries: Any = None
+    retry_deferred: bool = False
     # How long a gated action waits for an answer. Carried on the context
     # because the dispatcher has no settings object, and hardcoding it here
     # would make APPROVAL_TIMEOUT_SECONDS a knob that silently does nothing --
@@ -402,13 +451,19 @@ class ToolDispatcher:
     async def dispatch(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         started = time.monotonic()
         gated = requires_approval(name)
+        # Defer the remediation charge for anything that might still be refused:
+        # a gated action awaiting a human, and any action with a deterministic
+        # precondition. A refused action must never spend the run's one
+        # remediation -- otherwise the next legitimate fix is denied for a
+        # reason nobody can see.
+        defer_charge = gated or name in _PRECONDITIONED_ACTIONS
 
         try:
             # Gated actions defer the remediation charge until a human has
             # actually said yes. A denial must not spend the run's one
             # remediation, or the next legitimate fix gets refused for a reason
             # nobody can see.
-            self.ctx.ledger.charge_tool_call(name, defer_write=gated)
+            self.ctx.ledger.charge_tool_call(name, defer_write=defer_charge)
         except PolicyViolation as violation:
             if violation.kind == "policy_blocked":
                 # Surface the refusal to the model instead of ending the run.
@@ -423,20 +478,20 @@ class ToolDispatcher:
                 }
             raise
 
-        if gated:
-            blocked_reason = await self._precondition_failure(name)
-            if blocked_reason is not None:
-                # Refused before the human is asked. Sending an approval request
-                # for something the controller will reject anyway trains people
-                # to click through them.
-                self._record(name, arguments, f"BLOCKED: {blocked_reason}", started, blocked=True)
-                logger.warning("Precondition blocked '%s': %s", name, blocked_reason)
-                return {
-                    "status": "blocked_by_policy",
-                    "reason": blocked_reason,
-                    "guidance": self._refusal_guidance(),
-                }
+        blocked_reason = await self._precondition_failure(name)
+        if blocked_reason is not None:
+            # For a gated action this also means the human is never asked:
+            # sending an approval request for something the controller will
+            # reject anyway trains people to click through them.
+            self._record(name, arguments, f"BLOCKED: {blocked_reason}", started, blocked=True)
+            logger.warning("Precondition blocked '%s': %s", name, blocked_reason)
+            return {
+                "status": "blocked_by_policy",
+                "reason": blocked_reason,
+                "guidance": self._refusal_guidance(),
+            }
 
+        if gated:
             allowed, approval_result = await self._seek_approval(name, arguments)
             if not allowed:
                 self._record(
@@ -458,6 +513,19 @@ class ToolDispatcher:
                         "Approval was granted but the remediation budget is spent. "
                         "Notify a human and report 'needs_human'."
                     ),
+                }
+        elif defer_charge:
+            # Non-gated, but its precondition has now passed, so it really is a
+            # remediation and must be charged as one.
+            try:
+                self.ctx.ledger.charge_write(name)
+            except PolicyViolation as violation:
+                self._record(name, arguments, f"BLOCKED: {violation.message}", started, blocked=True)
+                logger.warning("Policy blocked '%s': %s", name, violation.message)
+                return {
+                    "status": "blocked_by_policy",
+                    "reason": violation.message,
+                    "guidance": self._refusal_guidance(),
                 }
 
         with tool_span(name):
@@ -569,16 +637,32 @@ class ToolDispatcher:
         }
 
     async def _precondition_failure(self, name: str) -> str | None:
-        """Deterministic checks a gated action must pass before anyone is asked.
+        """Deterministic checks an action must pass before it is dispatched.
 
-        Enforced here rather than in the prompt, per the same reasoning as the
+        Enforced here rather than in the prompt, for the same reason as the
         allowlist: a model can be argued out of a precondition, a controller
         cannot. Returns a refusal reason, or None when the action may proceed.
         """
-        if name != "reenable_refresh_schedule":
+        ctx = self.ctx
+
+        if name == "refresh_powerbi_dataset":
+            # The one case where the obvious fix makes the outage worse. If a
+            # retry has already been scheduled for this failure and its window
+            # has not arrived, refreshing now is exactly the stampede the
+            # deferral exists to prevent -- and the model proposing it anyway
+            # is precisely why this is not left to prompt wording.
+            if ctx.retries is not None and ctx.retries.is_deferred(ctx.signature):
+                row = ctx.retries.get(ctx.signature) or {}
+                return (
+                    "A retry for this failure is already scheduled for "
+                    f"{row.get('due_at')} because the capacity was throttling. "
+                    "Refreshing now would add load to a capacity that is already "
+                    "over its limits."
+                )
             return None
 
-        ctx = self.ctx
+        if name != "reenable_refresh_schedule":
+            return None
 
         # A refresh that succeeded during this run is the strongest evidence
         # available: the thing that was failing now works.
@@ -877,6 +961,45 @@ class ToolDispatcher:
                 "status": outcome.status,
                 "detail": outcome.detail,
                 "request_id": outcome.request_id,
+            }
+
+        if name == "defer_refresh_retry":
+            if ctx.retries is None:
+                # Deferring into a store that does not exist would drop the work
+                # while reporting that it was scheduled. Say so instead.
+                return {
+                    "status": "unavailable",
+                    "reason": (
+                        "No retry store is configured, so a deferred retry would "
+                        "never run. Report needs_human instead of deferring."
+                    ),
+                }
+            requested = int(args.get("retry_after_seconds") or 0)
+            row = ctx.retries.defer(
+                signature=ctx.signature,
+                request_id=ctx.request.request_id,
+                workspace_id=ctx.workspace_id,
+                dataset_id=ctx.dataset_id,
+                report_name=ctx.request.report_name or "",
+                reason=str(args.get("reason", "")),
+                retry_after_seconds=max(0, requested),
+            )
+            ctx.retry_deferred = row.get("status") == "pending"
+            return {
+                "status": row.get("status"),
+                "attempt": row.get("attempts"),
+                "due_at": row.get("due_at"),
+                "wait_seconds": row.get("wait_seconds"),
+                "guidance": (
+                    "The retry is scheduled. Report 'deferred_retry' as the outcome; "
+                    "do not also attempt a refresh in this run."
+                    if row.get("status") == "pending"
+                    else (
+                        "This dataset has now been deferred as many times as the "
+                        "policy allows. Repeated throttling is a capacity scheduling "
+                        "problem for a human. Report needs_human."
+                    )
+                ),
             }
 
         if name == "report_resolution":

@@ -295,6 +295,9 @@ Offer: this repo, the agent definitions, the prompts, the tool schemas, the
 | The approval card has no buttons | `APPROVAL_CALLBACK_URL` is unset. That is a valid configuration — answer with `triage-demo approve <request>`; the card carries the id |
 | Nobody can find what is waiting | `triage-demo approvals` lists every open request with its expiry |
 | An approval "expired" while somebody was reading it | `APPROVAL_TIMEOUT_SECONDS` defaults to 300. Raise it for a demo where you plan to talk over the card |
+| A refresh is refused with "a retry is already scheduled" | Working as designed: the capacity was throttling and a deferral is open. `triage-demo retries` shows when it is due; `triage-demo reset` clears it |
+| A deferred retry never runs | Nothing drained it. The sweep drains on every invocation; run it by hand with `triage-demo retries --drain` |
+| Deferred retries vanish between runs | The retry store degraded to in-memory. The container logs an error at startup when that happens |
 | No Teams card for a recurring alert | Expected: an incident is announced once. Check `notified_count` in the incident record. `triage-demo reset` to announce again |
 | The Teams channel fills with identical cards | The routine is running against mail that keeps being re-ingested. `azd ai routine disable bi-triage-schedule`, then check the processed-mail log is durable — the container logs an error at startup if it degraded to in-memory |
 | The routine is enabled again after a deploy | `azd deploy` re-upserts it from `azure.yaml`, where `enabled: true`. Disable it *after* deploying, not before |

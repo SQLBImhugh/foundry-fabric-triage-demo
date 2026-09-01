@@ -56,6 +56,7 @@ _OUTCOME_STYLE = {
     "flagged_data_quality": "bold cyan",
     "duplicate_suppressed": "bold yellow",
     "approval_denied": "bold yellow",
+    "deferred_retry": "bold cyan",
     "needs_human": "bold yellow",
     "declared_failed": "bold red",
     "agent_crashed": "bold red",
@@ -802,8 +803,14 @@ def cmd_reset(args: argparse.Namespace) -> int:
     # sitting there.
     runner.build_approval_channel().reset()
 
+    # And any postponed retry, or the next run inherits a deferral window and
+    # refuses to refresh for a reason belonging to the previous rehearsal.
+    if runner.retries is not None:
+        runner.retries.reset()
+
     console.print(
-        "[green]Flag table, incident store, processed-mail log and approvals cleared.[/green]"
+        "[green]Flag table, incident store, processed mail, approvals and "
+        "deferred retries cleared.[/green]"
     )
     return 0
 
@@ -885,6 +892,44 @@ def cmd_approve(args: argparse.Namespace) -> int:
 
 def cmd_deny(args: argparse.Namespace) -> int:
     return _decide(args, "decline")
+
+
+def cmd_retries(args: argparse.Namespace) -> int:
+    """Show retries the agent postponed, and optionally run the due ones."""
+    runner = TriageRunner(settings, base_dir=REPO_ROOT)
+    if runner.retries is None:
+        console.print("[dim]No retry store configured.[/dim]")
+        return 0
+
+    if args.drain:
+        lines = asyncio.run(runner.drain_due_retries())
+        if not lines:
+            console.print("[dim]Nothing due.[/dim]")
+            return 0
+        for line in lines:
+            console.print(line)
+        return 0
+
+    rows = runner.retries.pending()
+    if not rows:
+        console.print("[dim]No retries pending.[/dim]")
+        return 0
+
+    table = Table(title="Retries postponed")
+    table.add_column("Report")
+    table.add_column("Attempt")
+    table.add_column("Due")
+    table.add_column("Why")
+    for row in rows:
+        table.add_row(
+            str(row.get("report_name", "")),
+            str(row.get("attempts", "")),
+            str(row.get("due_at", "")),
+            str(row.get("reason", ""))[:60],
+        )
+    console.print(table)
+    console.print("\n[dim]Run the due ones with:[/dim] triage-demo retries --drain")
+    return 0
 
 
 def cmd_tools(args: argparse.Namespace) -> int:
@@ -984,6 +1029,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser(
         "approvals", help="Show actions awaiting a human decision"
     ).set_defaults(func=cmd_approvals)
+
+    retries = sub.add_parser("retries", help="Show retries the agent postponed")
+    retries.add_argument(
+        "--drain", action="store_true", help="Perform the retries whose window has passed"
+    )
+    retries.set_defaults(func=cmd_retries)
 
     for verb, handler, helptext in (
         ("approve", cmd_approve, "Authorise a pending action"),

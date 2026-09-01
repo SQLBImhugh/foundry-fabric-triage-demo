@@ -98,7 +98,19 @@ def test_retry_is_discouraged_where_it_would_be_futile(error: str) -> None:
     assert retry_is_discouraged(select_playbooks(error)) is True
 
 
-@pytest.mark.parametrize("error", [THROTTLED, TIMEOUT])
+def test_retry_is_discouraged_for_throttling_because_it_does_harm() -> None:
+    """Different reason from the three above, same answer.
+
+    A throttled refresh would probably succeed eventually, so this is not
+    futility -- it is that retrying adds load to a capacity already over its
+    limits, and doing that across several datasets turns contention into an
+    outage. The right move is `defer_refresh_retry`, which schedules the same
+    work for after the window.
+    """
+    assert retry_is_discouraged(select_playbooks(THROTTLED)) is True
+
+
+@pytest.mark.parametrize("error", [TIMEOUT])
 def test_retry_is_allowed_for_genuinely_transient_failures(error: str) -> None:
     assert retry_is_discouraged(select_playbooks(error)) is False
 

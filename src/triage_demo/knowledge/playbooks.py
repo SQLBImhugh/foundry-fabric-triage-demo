@@ -162,11 +162,16 @@ PLAYBOOKS: list[Playbook] = [
             "concurrently. The refresh was rejected because of contention, not because "
             "anything is wrong with the model or its source."
         ),
-        retry_useful=True,
+        retry_useful=False,
         suggested_tier="tier_1",
         guidance=(
-            "Safe to retry once. If it recurs on a schedule, the durable fix is spreading "
-            "refreshes away from peak, not repeated retries."
+            "Do not retry now. The capacity is already over its resource limits, so "
+            "another refresh adds load to the cause -- and across several datasets at "
+            "once that turns contention into an outage. Call `defer_refresh_retry` "
+            "instead: it schedules the refresh for after the window and costs no "
+            "remediation budget. The controller refuses an immediate refresh while "
+            "that deferral is open. If it recurs past the deferral limit, the durable "
+            "fix is spreading refreshes away from peak, which is a human's decision."
         ),
         watch_out=(
             "Retrying immediately inside a contention window can make it worse. Repeated "

@@ -154,6 +154,87 @@ class ScriptedProvider:
                 "Handing off to the Data Quality agent.",
             )
 
+        # Chaos injection comes before any legitimate branch, so the allowlist
+        # refusal is demonstrated whatever path the alert would otherwise take.
+        # Scenario 4 shares the throttled alert with scenario 8; without this
+        # ordering the throttle branch short-circuits and the rogue action is
+        # never proposed.
+        if self.rogue_unknown_action and "delete_dataset" not in called:
+            return (
+                "delete_dataset",
+                {"justification": "Clean slate."},
+                "Attempting an action outside the allowlist.",
+            )
+
+        # Capacity throttling is the one failure where the obvious fix makes it
+        # worse: the capacity is already over its limits, so a retry adds load
+        # to the thing that is overloaded. Postpone the work instead. Checked
+        # before the transient path, because a retry here is not merely
+        # unhelpful -- it is harmful.
+        context = results.get("get_request_context", {})
+        error_code = str(context.get("error_code") or "").lower()
+        if "throttl" in error_code or "capacity" in error_code:
+            deferred = results.get("defer_refresh_retry", {})
+            if "defer_refresh_retry" not in called:
+                return (
+                    "defer_refresh_retry",
+                    {
+                        "reason": (
+                            "The capacity rejected the refresh because it is over its "
+                            "resource limits. Retrying now would add load to a "
+                            "saturated capacity."
+                        ),
+                    },
+                    "Postponing the retry rather than adding load.",
+                )
+
+            scheduled = str(deferred.get("status")) == "pending"
+            if "notify_teams" not in called:
+                return (
+                    "notify_teams",
+                    {
+                        "title": (
+                            "Refresh retry postponed"
+                            if scheduled
+                            else "Repeated throttling needs a human"
+                        ),
+                        "outcome": "deferred_retry" if scheduled else "needs_human",
+                        "action_taken": (
+                            f"Scheduled a retry for {deferred.get('due_at')}. No refresh "
+                            "was attempted."
+                            if scheduled
+                            else "None. This dataset has been deferred as many times "
+                            "as the policy allows."
+                        ),
+                        "detail": str(deferred.get("guidance") or ""),
+                    },
+                    "Reporting the postponement.",
+                )
+            return (
+                "report_resolution",
+                {
+                    "outcome": "deferred_retry" if scheduled else "needs_human",
+                    "tier": "tier_1",
+                    "category": "transient",
+                    "severity": "low",
+                    "summary": (
+                        f"Retry scheduled for {deferred.get('due_at')} rather than "
+                        "performed now."
+                        if scheduled
+                        else "Throttling has recurred past the deferral limit."
+                    ),
+                    "root_cause": (
+                        "The capacity was saturated and rejected the refresh. The model "
+                        "and its source are healthy."
+                    ),
+                    "reasoning": [
+                        "Retrying into a saturated capacity adds load to the cause.",
+                        "The work is scheduled, not abandoned.",
+                    ],
+                },
+                "Reporting the outcome.",
+            )
+
         finding = results.get("consult_data_quality_agent", {})
         if finding.get("has_issue"):
             if "write_data_quality_flag" not in called:
@@ -266,13 +347,6 @@ class ScriptedProvider:
                     },
                     "Reporting the outcome.",
                 )
-
-        if self.rogue_unknown_action and "delete_dataset" not in called:
-            return (
-                "delete_dataset",
-                {"justification": "Clean slate."},
-                "Attempting an action outside the allowlist.",
-            )
 
         # A REPEATING failure is a different problem. Another refresh will not
         # help - the same thing will happen again. The right move is a fix with

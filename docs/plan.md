@@ -83,7 +83,7 @@ Everything runs with no tenant, no Azure login, no network.
 | Scripted / Azure OpenAI / Foundry providers | `src/triage_demo/providers/` |
 | Incident store with occurrence counting | `src/triage_demo/store/incidents.py` |
 | OTel GenAI spans with no-op fallback | `src/triage_demo/observability.py` |
-| 8 scenarios with machine-checked assertions | `scenarios/` |
+| 9 scenarios with machine-checked assertions | `scenarios/` |
 | CLI with live event rendering | `src/triage_demo/cli.py` |
 | 287 tests | `tests/` |
 

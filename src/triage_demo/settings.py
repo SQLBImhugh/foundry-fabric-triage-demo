@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     # the agent writes the request, a human writes the answer, and the agent
     # reads it back on a later poll -- possibly in a different process.
     approval_table_name: str = "approvals"
+    #: Retries the agent postponed rather than performing. Same endpoint, same
+    #: reason: the run that defers and the sweep that performs it are different
+    #: processes, often different invocations.
+    retry_table_name: str = "deferredretries"
     # The URL behind the card's Approve/Decline buttons. An incoming webhook
     # has no bot behind it, so Action.Submit does nothing; the buttons have to
     # be links to something that records the decision. Empty means the card

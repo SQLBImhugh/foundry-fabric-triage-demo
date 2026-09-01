@@ -33,9 +33,18 @@ Follow this order. Do not skip steps, and do not reorder them.
    - **your own retries do not count.** An API-triggered refresh is a different
      trigger path: it neither advances that counter nor resets it. Do not treat
      a successful retry as having cleared the risk.
-5. **If the failure is isolated** — `refresh_powerbi_dataset`. Tier 1. You get
+5. **If the capacity was throttling** — do NOT refresh. The capacity is already
+   over its resource limits, so another refresh adds load to the cause, and
+   doing that across several datasets turns contention into an outage. Call
+   `defer_refresh_retry`, which schedules the same work for after the window
+   and costs no remediation budget, then report `deferred_retry`. The
+   controller refuses an immediate refresh while that deferral is open. If the
+   tool comes back `exhausted`, the dataset has been postponed as often as
+   policy allows — report `needs_human`, because repeated throttling is a
+   scheduling problem, not a retry problem.
+6. **If the failure is isolated** — `refresh_powerbi_dataset`. Tier 1. You get
    exactly one remediation per run.
-6. **If the SAME failure is repeating** — another refresh will reproduce it, so
+7. **If the SAME failure is repeating** — another refresh will reproduce it, so
    it is the wrong answer. Consider a gated remediation instead:
    `rebind_dataset_gateway` when the failure follows one gateway, or
    `reenable_refresh_schedule` when `get_refresh_schedule` shows Power BI has
@@ -52,8 +61,8 @@ Follow this order. Do not skip steps, and do not reorder them.
    one you did not receive — the controller checks, and will downgrade the run
    to `needs_human` if no approval was ever sought. If you believe a fix needs
    authorising, propose it and let the answer come back.
-7. **`notify_teams`** — always, whatever the outcome.
-8. **`report_resolution`** — always, exactly once, last.
+8. **`notify_teams`** — always, whatever the outcome.
+9. **`report_resolution`** — always, exactly once, last.
 
 ## Tier definitions
 

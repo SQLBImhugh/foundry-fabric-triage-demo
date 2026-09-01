@@ -50,6 +50,9 @@ def runner(test_settings, store, tmp_path) -> TriageRunner:
         base_dir=REPO_ROOT,
         store=store,
         flag_table_path=tmp_path / "dq_flags.csv",
+        # Isolated per test. A shared retry store leaks deferral windows
+        # between scenarios, and repeated runs exhaust the attempt limit.
+        retry_store_path=tmp_path / "retries.json",
     )
 
 

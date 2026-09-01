@@ -58,6 +58,10 @@ _INVESTIGATE_OUTCOMES = frozenset(
         # something a person judged wrong. That is the input for deciding what
         # to automate next - and what never to.
         "approval_denied",
+        # Deliberately absent: `deferred_retry`. A postponed retry is work in
+        # hand, not a problem for a person. If it is still throttled after the
+        # deferral limit the controller reports `needs_human` instead, which is
+        # in this set and does reach the queue.
     }
 )
 
