@@ -88,9 +88,9 @@ immediately.
 The control is an Exchange `ApplicationAccessPolicy`:
 
 ```
-Mork@…   (the alerts mailbox)   Granted
-mhugh@…                         Denied
-admin@…                         Denied
+bi-alerts@…    (the alerts mailbox)   Granted
+anyone-else@…                         Denied
+admin@…                               Denied
 ```
 
 Worth knowing: the policy accepts a **managed identity's** appId too, so the

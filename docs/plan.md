@@ -104,7 +104,7 @@ fixed and pinned by regression tests in `tests/test_hardening.py`. Summary in
 
 | Item | Delivered |
 |---|---|
-| Foundry project | `bitriage-foundry-eus` / `bi-request-triage` (East US) |
+| Foundry project | One AI Foundry account + project (East US) |
 | Model deployment | `gpt-5.6-luna`, plus `gpt-5.4` as a measured fallback |
 | Monitored mailbox | A real user mailbox, scoped to this app alone |
 | App registration | `Mail.Read` (application), admin consented |

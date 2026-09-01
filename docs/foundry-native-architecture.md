@@ -195,7 +195,7 @@ created solely to read one demo mailbox — successfully read the *global
 administrator's* inbox.
 
 ```
-target mailbox: admin@mngenvmcap777813.onmicrosoft.com
+target mailbox: admin@<tenant>.onmicrosoft.com
   AUTHORIZED (200) - app can read a SECOND mailbox
 ```
 
