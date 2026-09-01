@@ -572,13 +572,14 @@ def test_the_tenant_setting_refusal_says_what_to_change() -> None:
     """401 PowerBINotAuthorizedException arrives with no message at all.
 
     Measured against a real tenant: the body is the code, an empty parameter
-    bag, and nothing else. Without a hint the operator is told only that the
-    probe "could not run".
+    bag, and nothing else. The natural reading -- "grant it more access" -- is
+    wrong when the cause is Direct Lake, so the hint has to say so outright.
     """
     hint = _permission_hint(401, '{"error":{"code":"PowerBINotAuthorizedException"}}')
 
-    assert "security group" in hint
-    assert "Tenant settings" in hint
+    assert "Direct Lake" in hint
+    assert "fixed identity" in hint
+    assert "will not fix it" in hint
 
 
 def test_the_permission_refusal_is_not_mistaken_for_a_wrong_id() -> None:

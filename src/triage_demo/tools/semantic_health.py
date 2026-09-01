@@ -62,27 +62,33 @@ class ProbeResult:
 def _permission_hint(status: int, detail: str) -> str:
     """Say what the caller has to go and change.
 
-    Power BI's refusals do not describe their own cause, and the two that stop
+    Power BI's refusals do not describe their own cause, and the ones that stop
     a detector look nothing like what is actually wrong:
 
     * ``401 PowerBINotAuthorizedException`` arrives with an empty parameter bag
-      and no message. It usually means *Allow service principals to use Power
-      BI APIs* is enabled but scoped to a security group the caller is not in
-      -- nothing in the response mentions groups, tenant settings, or even
-      permissions.
+      and no message at all. Against a Fabric workspace the usual cause is a
+      **Direct Lake** model: it reaches OneLake as the *caller*, and Microsoft
+      does not support app-only callers for that, so a service principal is
+      refused no matter what permission it holds. Measured against a real
+      medallion workspace, where every table was Direct Lake and the identity
+      was already workspace Contributor. The fix is to point the model's OneLake
+      connection at a fixed identity instead of SSO -- not to grant more access,
+      which is the natural but wrong reading of "not authorized".
     * ``404 PowerBIEntityNotFound`` is what insufficient workspace permission
       looks like. The dataset exists; the caller cannot see it. Reading it as
       "wrong id" sends people to check GUIDs that were right all along.
 
-    Cost half an hour to work out once, against a real tenant. Writing it into
-    the error means nobody pays that twice.
+    Cost most of an afternoon to work out once. Writing it into the error means
+    nobody pays that twice.
     """
     if status == 401 and "NotAuthorized" in detail:
         return (
-            "\nHint: the identity is probably outside the security group that "
-            "'Allow service principals to use Power BI APIs' is scoped to. "
-            "Check Admin portal -> Tenant settings, and note that Power BI can "
-            "take up to an hour to honour a new group membership."
+            "\nHint: if this is a Direct Lake model, app-only callers are not "
+            "supported while it reaches OneLake by SSO -- set the model's "
+            "OneLake connection to a fixed identity. Otherwise check that "
+            "'Semantic Model Execute Queries REST API' is enabled and that the "
+            "identity is inside any security group those tenant settings are "
+            "scoped to. Granting more workspace permission will not fix it."
         )
     if status == 404 and "EntityNotFound" in detail:
         return (

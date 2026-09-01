@@ -320,32 +320,43 @@ Two scans are needed before anything is announced (`confirmations`, default 2).
 A single sweep marks a probe suspect and says nothing — that is the
 suspect-then-confirm rule, not a fault.
 
-### Permissions, and a limit worth knowing before you plan
+### Permissions, and the limit that will actually stop you
 
-The identity that runs the sweep needs **workspace Contributor**, not Viewer.
+**Direct Lake models cannot be probed by an app-only caller.** A Direct Lake
+model reaches OneLake as the *caller*, and Microsoft does not support service
+principals for that, so `executeQueries` is refused whatever permission the
+identity holds. Verified against a real Fabric medallion workspace: every table
+Direct Lake, the identity already workspace Contributor, and the response a bare
+`401 PowerBINotAuthorizedException` with an empty parameter bag and no message.
 
-Viewer plus Build permission on the one dataset would be the least-privileged
-combination, and it is not available to an app-only caller: the dataset users
-API rejects `principalType: App` with *"API supported only for User or Group
-principal types"*, and `executeQueries` requires Build. Contributor is the
-least-privileged workspace role that carries Build for a service principal.
+Nothing in that response mentions Direct Lake, OneLake or SSO, and the obvious
+reading — grant it more access — does not work. To probe a Direct Lake model,
+set its OneLake connection to a **fixed identity** rather than SSO. Import-mode
+models have no such restriction.
 
-Two tenant settings gate this, both under **Admin portal → Tenant settings**:
+The detector reports this as a **detector fault**, never as a data finding. "I
+could not check" is not "everything is fine", and reporting it as bad data would
+tell somebody their numbers are wrong because of a platform limitation.
+
+Beyond that, the identity that runs the sweep needs **workspace Contributor**,
+not Viewer. Viewer plus Build permission on the one dataset would be the
+least-privileged combination, and it is not available to an app-only caller: the
+dataset users API rejects `principalType: App` with *"API supported only for User
+or Group principal types"*, and `executeQueries` requires Build. Contributor is
+the least-privileged workspace role that carries Build for a service principal.
+
+Also confirm, under **Admin portal → Tenant settings**:
 
 | Setting | Needs |
 |---|---|
-| *Allow service principals to use Power BI APIs* | Enabled, **and the identity inside whichever security group it is scoped to** |
-| *Dataset Execute Queries REST API* | Enabled |
+| *Semantic Model Execute Queries REST API* | Enabled, and the identity inside any security group it is scoped to |
+| *Service principals can call Fabric public APIs* | Enabled, same caveat |
 
-The first is the one that costs time. It is commonly enabled but restricted to a
-named security group, so an identity outside that group gets
-`PowerBINotAuthorizedException` (HTTP 401) with nothing to say it is a group
-problem. Insufficient workspace permission reports as `PowerBIEntityNotFound`
-(HTTP 404) rather than 403, so neither status describes its own cause.
-
-Both surface as a **detector fault**, never as a data finding — "I could not
-check" is not "everything is fine", and reporting it as bad data would tell
-somebody their numbers are wrong because of a missing permission.
+Neither failure status describes its own cause. Missing workspace permission
+reports `PowerBIEntityNotFound` (HTTP 404) rather than 403, so it reads as a
+wrong id; the Direct Lake and tenant-setting refusals both report
+`PowerBINotAuthorizedException` (HTTP 401) with no detail at all. The detector
+attaches a hint to each rather than passing the bare platform error along.
 
 ```powershell
 triage-demo health              # what the probes found
