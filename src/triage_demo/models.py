@@ -63,7 +63,12 @@ class BIRequest(BaseModel):
     # "interactive" covers an alert pasted straight into the Foundry Playground.
     # It is a genuinely different provenance from a polled mailbox and the
     # incident record should say so rather than claim the mail arrived.
-    source: Literal["mock", "graph", "interactive"] = "mock"
+    #
+    # "detector" is the silent-failure path, where nothing arrived at all: the
+    # refresh reported success and the scanner found the data wrong anyway.
+    # Worth distinguishing, because "nobody was told" is the interesting part
+    # of those incidents.
+    source: Literal["mock", "graph", "interactive", "detector"] = "mock"
 
     def error_text(self) -> str:
         """The blob a signature is computed over."""

@@ -808,9 +808,13 @@ def cmd_reset(args: argparse.Namespace) -> int:
     if runner.retries is not None:
         runner.retries.reset()
 
+    # And the detector's baselines, or a rehearsal inherits "healthy" from the
+    # last one and reports nothing on data it has never actually seen.
+    runner.semantic_health.reset()
+
     console.print(
-        "[green]Flag table, incident store, processed mail, approvals and "
-        "deferred retries cleared.[/green]"
+        "[green]Flag table, incident store, processed mail, approvals, "
+        "deferred retries and health baselines cleared.[/green]"
     )
     return 0
 
@@ -932,6 +936,44 @@ def cmd_retries(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_health(args: argparse.Namespace) -> int:
+    """Run the silent-failure sweep, or show what it knows."""
+    runner = TriageRunner(settings, base_dir=REPO_ROOT)
+
+    if args.baselines:
+        states = runner.semantic_health.all_states()
+        if not states:
+            console.print("[dim]No baselines recorded yet.[/dim]")
+            return 0
+        table = Table(title="Semantic model baselines")
+        table.add_column("Probe")
+        table.add_column("Report")
+        table.add_column("Last max date")
+        table.add_column("Rows")
+        table.add_column("Suspect")
+        for state in states:
+            table.add_row(
+                state.probe_name,
+                state.report_name,
+                state.last_max_date or "-",
+                f"{state.last_row_count:,}" if state.last_row_count is not None else "-",
+                str(state.suspect_count) if state.suspect_count else "",
+            )
+        console.print(table)
+        return 0
+
+    lines = asyncio.run(runner.silent_sweep())
+    if not lines:
+        console.print(
+            "[green]Nothing to report.[/green] "
+            "[dim]Every configured probe matched its baseline, or none are configured.[/dim]"
+        )
+        return 0
+    for line in lines:
+        console.print(line)
+    return 0
+
+
 def cmd_tools(args: argparse.Namespace) -> int:
     """Print the tool schemas — useful when the audience asks what the agent can do."""
     import json
@@ -1035,6 +1077,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--drain", action="store_true", help="Perform the retries whose window has passed"
     )
     retries.set_defaults(func=cmd_retries)
+
+    health = sub.add_parser(
+        "health", help="Look for failures that never raised an alert"
+    )
+    health.add_argument(
+        "--baselines", action="store_true", help="Show what healthy looked like last time"
+    )
+    health.set_defaults(func=cmd_health)
 
     for verb, handler, helptext in (
         ("approve", cmd_approve, "Authorise a pending action"),

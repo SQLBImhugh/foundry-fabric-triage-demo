@@ -63,6 +63,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # conversation history, so a five-character sweep request arrived as several
 # hundred characters of a previous alert and got re-triaged.
 _SWEEP_COMMANDS = frozenset({"sweep", "scheduled sweep", "run", "check mail", ""})
+#: The second sentinel. A different trigger from the mailbox sweep because
+#: there is nothing to react to -- these failures never announce themselves, so
+#: the only way to find them is to go and measure.
+_SILENT_COMMANDS = frozenset({"silent sweep", "silent-sweep", "health sweep", "scan"})
 
 
 def _latest_text(messages: Any) -> str:
@@ -171,16 +175,21 @@ class TriageControllerAgent(BaseAgent):
 
     async def _run_once(self, messages: Any) -> AgentResponse[Any]:
         text = _latest_text(messages)
-        is_sweep = text.strip().lower() in _SWEEP_COMMANDS
+        command = text.strip().lower()
+        is_sweep = command in _SWEEP_COMMANDS
+        is_silent = command in _SILENT_COMMANDS
 
         # One triage at a time. Two concurrent runs would race on the incident
         # store and could remediate the same failure twice -- the exact
         # duplicate-action problem the dedup logic exists to prevent.
         async with self._lock:
             try:
-                summary = await (
-                    self._drain_mailbox() if is_sweep else self._triage_text(text)
-                )
+                if is_silent:
+                    summary = await self._silent_sweep()
+                elif is_sweep:
+                    summary = await self._drain_mailbox()
+                else:
+                    summary = await self._triage_text(text)
             except Exception as exc:
                 logger.exception("Triage run failed")
                 summary = (
@@ -210,6 +219,21 @@ class TriageControllerAgent(BaseAgent):
         )
         artifacts = await self._runner.run_request(request)
         return _summarise(artifacts)
+
+    async def _silent_sweep(self) -> str:
+        """Go looking for failures that never sent an alert.
+
+        No mailbox involved. This is the path for the case the alert-driven
+        design cannot see: a refresh that reported success while the data did
+        not arrive.
+        """
+        lines = await self._runner.silent_sweep()
+        if not lines:
+            return (
+                "No silent failures found. Every configured probe matched its "
+                "baseline, or none are configured."
+            )
+        return f"Silent sweep found {len(lines)} thing(s) worth saying:\n" + "\n".join(lines)
 
     async def _drain_mailbox(self) -> str:
         """Triage everything new in the alerts mailbox."""

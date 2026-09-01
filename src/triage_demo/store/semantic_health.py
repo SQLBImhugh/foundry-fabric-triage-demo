@@ -1,0 +1,275 @@
+"""Baselines for the silent-failure detector.
+
+Detecting "this did not move" requires knowing where it was. That is the whole
+difficulty: a stale model looks exactly like a healthy one in a single reading,
+and only differs from its own history.
+
+Two rules govern what goes in here, and both exist because a detector that
+cries wolf gets muted, after which it may as well not exist:
+
+**Baselines are only ever updated from healthy observations.** Accepting a
+suspect reading as the new normal teaches the detector that the failure is
+fine, and it never alerts again. That is a detector which reports success
+while blind, which is worse than no detector.
+
+**A suspect reading is not a finding.** The first anomalous scan records
+suspicion and says nothing. A finding needs the condition to survive a
+confirmation scan, because a probe run mid-refresh sees a half-loaded table
+and would otherwise page somebody about a model that was fine ninety seconds
+later.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import threading
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, Protocol
+
+logger = logging.getLogger("triage.store.semantic_health")
+
+
+def _utcnow() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def probe_key(workspace_id: str, dataset_id: str, probe_name: str) -> str:
+    """Stable, key-safe identity for one probe on one model."""
+    raw = f"{workspace_id}|{dataset_id}|{probe_name}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+@dataclass
+class ProbeState:
+    """What healthy looked like last time, and how odd things look now."""
+
+    workspace_id: str
+    dataset_id: str
+    probe_name: str
+    report_name: str = ""
+
+    #: Last accepted healthy values. Never written from a suspect scan.
+    last_max_date: str = ""
+    last_row_count: int | None = None
+    last_control_totals: dict[str, float] = field(default_factory=dict)
+    last_healthy_at: str = ""
+
+    #: How many consecutive scans have looked wrong, and since when.
+    suspect_count: int = 0
+    first_suspect_at: str = ""
+    suspect_kind: str = ""
+
+    #: Detector health, kept apart from data health on purpose. A probe that
+    #: cannot run is not evidence that the data is stale.
+    consecutive_errors: int = 0
+    last_error: str = ""
+
+    observations: int = 0
+    updated_at: str = field(default_factory=_utcnow)
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+class SemanticHealthStore(Protocol):
+    def get(self, workspace_id: str, dataset_id: str, probe_name: str) -> ProbeState | None: ...
+    def put(self, state: ProbeState) -> None: ...
+    def all_states(self) -> list[ProbeState]: ...
+    def reset(self) -> None: ...
+
+
+class InMemorySemanticHealthStore:
+    """Correct for one process, useless across hosted-agent invocations.
+
+    A detector whose memory dies with the process compares every reading
+    against nothing, so it can never conclude that something failed to move --
+    the exact question it exists to answer.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._items: dict[str, dict[str, Any]] = {}
+
+    def get(self, workspace_id: str, dataset_id: str, probe_name: str) -> ProbeState | None:
+        with self._lock:
+            raw = self._items.get(probe_key(workspace_id, dataset_id, probe_name))
+            return ProbeState(**raw) if raw else None
+
+    def put(self, state: ProbeState) -> None:
+        state.updated_at = _utcnow()
+        with self._lock:
+            key = probe_key(state.workspace_id, state.dataset_id, state.probe_name)
+            self._items[key] = state.as_dict()
+            self._persist(key, state)
+
+    def all_states(self) -> list[ProbeState]:
+        with self._lock:
+            return [ProbeState(**raw) for raw in self._items.values()]
+
+    def reset(self) -> None:
+        with self._lock:
+            self._items.clear()
+            self._on_reset()
+
+    @property
+    def is_durable(self) -> bool:
+        return False
+
+    # --- durability hooks --------------------------------------------------
+
+    def _persist(self, key: str, state: ProbeState) -> None:  # pragma: no cover
+        """No-op. Caller holds the lock."""
+
+    def _on_reset(self) -> None:  # pragma: no cover - no-op base
+        """No-op."""
+
+
+class JsonFileSemanticHealthStore(InMemorySemanticHealthStore):
+    """Survives a restart offline, with no Azure dependency."""
+
+    def __init__(self, path: str | Path):
+        super().__init__()
+        self._path = Path(path)
+        self._load()
+
+    def _load(self) -> None:
+        if not self._path.exists():
+            return
+        try:
+            raw = json.loads(self._path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("Unreadable semantic health store (%s)", type(exc).__name__)
+            return
+        if isinstance(raw, dict):
+            self._items.update(raw)
+
+    def _reload(self) -> None:
+        self._items.clear()
+        self._load()
+
+    def get(self, workspace_id: str, dataset_id: str, probe_name: str) -> ProbeState | None:
+        with self._lock:
+            self._reload()
+        return super().get(workspace_id, dataset_id, probe_name)
+
+    def all_states(self) -> list[ProbeState]:
+        with self._lock:
+            self._reload()
+        return super().all_states()
+
+    def _persist(self, key: str, state: ProbeState) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._path.write_text(json.dumps(self._items, indent=2), encoding="utf-8")
+
+    def _on_reset(self) -> None:
+        if self._path.exists():
+            self._path.unlink()
+
+
+class AzureTableSemanticHealthStore(InMemorySemanticHealthStore):
+    """The deployed path. Degrades to in-memory, loudly.
+
+    Degraded, every sweep starts with no history and can never detect a
+    watermark that failed to advance. The detector would run, find nothing,
+    and report health it has not established -- so this logs an error rather
+    than a warning.
+    """
+
+    _PARTITION = "probe"
+
+    def __init__(
+        self,
+        *,
+        endpoint: str,
+        table_name: str = "semantichealth",
+        credential: Any = None,
+    ) -> None:
+        super().__init__()
+        self._endpoint = endpoint
+        self._table_name = table_name
+        self._client = None
+        self._degraded = False
+
+        try:
+            self._client = self._build_client(credential)
+            self._load()
+        except Exception as exc:
+            self._degraded = True
+            logger.error(
+                "Semantic health store degraded to in-memory: could not open %s at %s "
+                "(%s). Every sweep will start blind and cannot detect staleness.",
+                table_name,
+                endpoint,
+                type(exc).__name__,
+            )
+
+    @property
+    def is_durable(self) -> bool:
+        return self._client is not None and not self._degraded
+
+    def _build_client(self, credential: Any):
+        from azure.data.tables import TableServiceClient
+
+        if credential is None:
+            from azure.identity import DefaultAzureCredential
+
+            credential = DefaultAzureCredential()
+
+        service = TableServiceClient(endpoint=self._endpoint, credential=credential)
+        service.create_table_if_not_exists(self._table_name)
+        return service.get_table_client(self._table_name)
+
+    def _load(self) -> None:
+        if self._client is None:
+            return
+        loaded = 0
+        for entity in self._client.list_entities():
+            raw = entity.get("payload")
+            if not raw:
+                continue
+            try:
+                self._items[str(entity["RowKey"])] = json.loads(raw)
+                loaded += 1
+            except Exception:
+                logger.warning("Skipping unreadable probe state %s", entity.get("RowKey"))
+        logger.info("Loaded %d probe baseline(s) from %s", loaded, self._table_name)
+
+    def _persist(self, key: str, state: ProbeState) -> None:
+        if self._client is None:
+            return
+        try:
+            self._client.upsert_entity(
+                {
+                    "PartitionKey": self._PARTITION,
+                    "RowKey": key,
+                    # Promoted for operator queries; payload stays authoritative.
+                    "probe_name": state.probe_name,
+                    "report_name": state.report_name,
+                    "last_max_date": state.last_max_date,
+                    "last_row_count": state.last_row_count or 0,
+                    "suspect_count": state.suspect_count,
+                    "payload": json.dumps(state.as_dict()),
+                }
+            )
+        except Exception as exc:
+            self._degraded = True
+            logger.error(
+                "Could not persist probe baseline %s (%s); the next sweep will be blind",
+                state.probe_name,
+                type(exc).__name__,
+            )
+
+    def _on_reset(self) -> None:
+        if self._client is None:
+            return
+        for entity in self._client.list_entities():
+            try:
+                self._client.delete_entity(
+                    partition_key=entity["PartitionKey"], row_key=entity["RowKey"]
+                )
+            except Exception:  # pragma: no cover - best effort
+                logger.warning("Could not delete probe state %s", entity.get("RowKey"))

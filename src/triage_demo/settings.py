@@ -87,6 +87,16 @@ class Settings(BaseSettings):
     #: reason: the run that defers and the sweep that performs it are different
     #: processes, often different invocations.
     retry_table_name: str = "deferredretries"
+    #: Baselines for the silent-failure detector. Same endpoint again.
+    semantic_health_table_name: str = "semantichealth"
+    #: The detector's off switch. Configuration rather than routine state,
+    #: because `azd deploy` re-enables a disabled routine from azure.yaml.
+    silent_sweep_enabled: bool = True
+    #: Probe configuration. A list of dicts; see detectors/silent_failures.py.
+    #: Empty means the detector has nothing to watch and does nothing, which is
+    #: the correct default for a system that has not been told what "fresh"
+    #: means for a given model.
+    silent_health_probes: list[dict] = Field(default_factory=list)
     # The URL behind the card's Approve/Decline buttons. An incoming webhook
     # has no bot behind it, so Action.Submit does nothing; the buttons have to
     # be links to something that records the decision. Empty means the card

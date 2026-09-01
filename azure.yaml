@@ -100,6 +100,16 @@ services:
             # the request id and the CLI is the channel.
             - name: APPROVAL_CALLBACK_URL
               value: ${APPROVAL_CALLBACK_URL}
+            # The silent-failure detector. Off switch lives here rather than
+            # in routine state, because a deploy re-enables a disabled
+            # routine from this same file.
+            - name: SILENT_SWEEP_ENABLED
+              value: "true"
+            # Empty by default. A detector told nothing watches nothing,
+            # which is correct: "fresh" is a business question per model, and
+            # guessing it produces the false positives that get it muted.
+            - name: SILENT_HEALTH_PROBES
+              value: ${SILENT_HEALTH_PROBES}
             # Live Power BI. No client id or secret: Power BI accepts this
             # agent identity as a workspace principal, so the controller
             # triggers refreshes and reads refresh history as itself.

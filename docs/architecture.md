@@ -272,6 +272,54 @@ left open after the fix keeps suppressing genuine recurrences.
 
 `triage-demo retries` shows what is postponed; `--drain` performs what is due.
 
+## Silent failures: the ones that never send an alert
+
+Every other path here begins with Power BI reporting a failure. The failures
+that hurt most report nothing: the refresh succeeds and the data is wrong
+anyway. `walkthrough/PERSONAS.html` states the analyst's problem as "a report
+that looks normal but is a day stale", and until the detector existed that was
+the one case an alert-driven system could not see.
+
+`detectors/silent_failures.py` asks three questions of a semantic model:
+
+| Question | Failure it catches |
+|---|---|
+| Did the watermark advance? | The pipeline ran and loaded nothing |
+| Is the row count near its baseline? | A partial load; every total silently wrong |
+| Can the probe still run? | A column or measure changed under the report |
+
+**Deterministic, not a third prompt agent.** Every question is a measurement —
+a maximum, a count, a comparison — and invariant 4 says measured evidence
+outranks model output. A model asked whether a 60% row drop is acceptable will
+sometimes say yes, which is precisely the judgement this must not make. The
+Triage agent writes the explanation; the scanner decides what is true.
+
+**The model never writes DAX.** Queries are generated from stored probe
+configuration, so a prompt injection in an alert email cannot turn a read-only
+detector into an arbitrary query engine against the finance model.
+
+**False positives are the failure mode that matters.** An alert that fires
+wrongly gets the channel muted, and then the real one is missed too. The bounds:
+
+- A single anomalous reading is `suspect` and says nothing. A finding needs the
+  condition to survive a confirmation scan — a probe running mid-refresh sees a
+  half-loaded table.
+- Row collapse needs **both** a relative and an absolute threshold. Relative
+  alone makes small tables permanently noisy (7 rows to 4 is a 57% drop);
+  absolute alone never fires on one that genuinely emptied.
+- Freshness is configured per probe, never inferred. A T+3 finance model is
+  legitimately three days behind.
+- **Baselines only ever advance from healthy readings.** Accepting a suspect
+  reading as the new normal teaches the detector that the failure is fine.
+- "We cannot see this model" is `detector_fault`, never a data finding. A
+  permissions change must not read as a data outage.
+
+A confirmed finding becomes an incident with a normal signature, so the existing
+deduplication applies: a detector polling every fifteen minutes announces once.
+
+`triage-demo health` runs a sweep; `--baselines` shows what healthy looked like.
+The hosted agent answers `silent sweep` as a second sentinel alongside `sweep`.
+
 ## The incident store
 
 Every terminal outcome is persisted:

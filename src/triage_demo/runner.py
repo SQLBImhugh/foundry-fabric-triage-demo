@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +22,11 @@ import yaml
 
 from triage_demo.agents.data_quality_agent import DataQualityAgent
 from triage_demo.agents.triage_agent import EventHook, TriageAgent, TriageDeps
+from triage_demo.detectors.silent_failures import (
+    HealthFinding,
+    SilentFailureScanner,
+    load_probes,
+)
 from triage_demo.models import BIRequest, Incident, TriageResult
 from triage_demo.policy import TriagePolicy
 from triage_demo.providers import get_provider
@@ -30,11 +35,20 @@ from triage_demo.store.approvals import JsonFileApprovalChannel
 from triage_demo.store.incidents import IncidentStore, JsonFileIncidentStore
 from triage_demo.store.processed import JsonFileProcessedLog
 from triage_demo.store.retries import JsonFileRetryStore
+from triage_demo.store.semantic_health import JsonFileSemanticHealthStore
 from triage_demo.tools.dataset import DatasetSource
 from triage_demo.tools.flags import DataQualityFlagTable
 from triage_demo.tools.inbox import GraphInbox, MockInbox
 from triage_demo.tools.powerbi import LivePowerBIClient, MockPowerBIClient
-from triage_demo.tools.teams import MockTeamsNotifier, WorkflowsWebhookTeamsNotifier
+from triage_demo.tools.semantic_health import (
+    LiveSemanticHealthClient,
+    MockSemanticHealthClient,
+)
+from triage_demo.tools.teams import (
+    MockTeamsNotifier,
+    ResolutionSummary,
+    WorkflowsWebhookTeamsNotifier,
+)
 
 logger = logging.getLogger("triage.runner")
 
@@ -130,6 +144,7 @@ class TriageRunner:
         on_event: EventHook | None = None,
         flag_table_path: Path | None = None,
         retry_store_path: Path | None = None,
+        semantic_health_path: Path | None = None,
     ):
         self.settings = settings
         self.base_dir = Path(base_dir)
@@ -141,6 +156,7 @@ class TriageRunner:
         # Built once per runner rather than per run: a deferral written by one
         # run has to be visible to the precondition check of the next.
         self.retries = self.build_retry_store(retry_store_path)
+        self.semantic_health = self.build_semantic_health_store(semantic_health_path)
         self._teams = None
 
     # --- inbox -------------------------------------------------------------
@@ -322,6 +338,174 @@ class TriageRunner:
 
         logger.info("Drained %d due retry/retries", len(due))
         return lines
+
+    async def silent_sweep(self, *, now: datetime | None = None) -> list[str]:
+        """Look for failures that never sent an alert.
+
+        Separate from the mailbox sweep because the trigger is different: there
+        is nothing to react to, so this polls. A confirmed finding becomes an
+        incident with the same signature discipline as an emailed failure, so
+        the existing deduplication applies and a detector that polls every
+        fifteen minutes announces once rather than every time it looks.
+
+        Returns one line per probe that needed saying something about. Healthy
+        models are silent; a detector that reports "still fine" every quarter
+        hour is a detector people filter.
+        """
+        probes = load_probes(self.settings.silent_health_probes)
+        if not probes:
+            return []
+        if not self.settings.silent_sweep_enabled:
+            # Configuration, not routine state. A deploy re-enables a disabled
+            # routine, so the off switch cannot live there.
+            logger.info("Silent sweep is disabled in configuration; skipping %d probe(s)", len(probes))
+            return []
+
+        scanner = SilentFailureScanner(
+            self.build_health_client(), self.semantic_health, now=now
+        )
+        findings = await scanner.sweep(probes)
+
+        lines: list[str] = []
+        for finding in findings:
+            if finding.status == "healthy":
+                continue
+
+            if finding.status == "suspect":
+                # Deliberately quiet. One odd reading is not a finding, and
+                # saying so out loud would be the false positive.
+                lines.append(
+                    f"- {finding.report_name or finding.probe}: possible {finding.kind}, "
+                    f"awaiting confirmation ({finding.suspect_count})"
+                )
+                continue
+
+            if finding.status == "detector_fault":
+                lines.append(
+                    f"- {finding.report_name or finding.probe}: probe could not run "
+                    f"({finding.detail[:80]})"
+                )
+                continue
+
+            lines.append(await self._record_silent_finding(finding))
+
+        return lines
+
+    async def _record_silent_finding(self, finding: HealthFinding) -> str:
+        """Turn a confirmed finding into an incident, and say it once.
+
+        The signature is built from the same components as an emailed failure,
+        so a silent finding and a later alert about the same model collapse
+        into one incident rather than two.
+        """
+        signature, _ = compute_signature(
+            source="silent_failure",
+            error=finding.detail,
+            artifact_kind="semantic_model",
+            artifact_name=finding.report_name or finding.probe,
+            exception_class=finding.kind,
+        )
+
+        known = self.store.find_open(signature)
+        already_announced = known is not None and known.notified_count > 0
+
+        request = BIRequest(
+            request_id=f"silent:{finding.probe}",
+            sender="silent-failure-detector",
+            subject=(
+                f"Silent failure detected: {finding.report_name or finding.probe} "
+                f"({finding.kind})"
+            ),
+            body=finding.detail,
+            report_name=finding.report_name,
+            dataset_id=finding.dataset_id,
+            workspace_id=finding.workspace_id,
+            error_code=finding.kind,
+            source="detector",
+        )
+
+        result = TriageResult(
+            outcome="needs_human",
+            summary=finding.detail,
+            request_id=request.request_id,
+            signature=signature,
+            root_cause=(
+                "The refresh reported success, so no failure alert was raised. "
+                "Found by measuring the model rather than by being told."
+            ),
+            action_taken="",
+            notification_delivered=False,
+        )
+
+        delivered = False
+        if not already_announced:
+            summary = ResolutionSummary(
+                title=f"Silent failure: {finding.report_name or finding.probe}",
+                report_name=finding.report_name,
+                error=f"{finding.kind} (no alert was raised)",
+                action_taken="None. Detected by scan, not by alert.",
+                outcome="needs_human",
+                timestamp=datetime.now(UTC).isoformat(timespec="seconds"),
+                detail=finding.detail,
+                facts={
+                    "Observed": str(finding.observed),
+                    "Last healthy": str(finding.baseline),
+                    "Confirmed after": f"{finding.suspect_count} consecutive scans",
+                },
+            )
+            delivery = await self.build_teams().post(summary)
+            delivered = bool(
+                delivery.get("delivered") if isinstance(delivery, dict) else False
+            )
+            result = result.model_copy(update={"notification_delivered": delivered})
+
+        self.store.record(
+            result,
+            report_name=finding.report_name,
+            original_error=finding.detail,
+            agent_name="SilentFailureScanner",
+            source="silent_failure",
+            notified=delivered,
+        )
+
+        state = "announced" if delivered else "already announced"
+        return f"- {finding.report_name or finding.probe}: {finding.kind} confirmed, {state}"
+
+    def build_semantic_health_store(self, path: Path | None = None):
+        """Baselines for the silent-failure detector.
+
+        Durable, or the detector cannot work at all: every sweep would start
+        with no history and could never conclude that a watermark failed to
+        advance, which is the only question it exists to answer.
+        """
+        if path is not None:
+            return JsonFileSemanticHealthStore(path)
+
+        endpoint = self.settings.incident_table_endpoint
+        if not endpoint:
+            return JsonFileSemanticHealthStore(self.base_dir / "runs" / "semantic_health.json")
+
+        from triage_demo.store.semantic_health import AzureTableSemanticHealthStore
+
+        store = AzureTableSemanticHealthStore(
+            endpoint=endpoint, table_name=self.settings.semantic_health_table_name
+        )
+        if not store.is_durable:
+            logger.error(
+                "Semantic health store at %s is not durable; the silent-failure "
+                "detector will start blind on every sweep and detect nothing",
+                endpoint,
+            )
+        return store
+
+    def build_health_client(self):
+        if self.settings.triage_tool_mode == "live" and self.settings.powerbi_tenant_id:
+            return LiveSemanticHealthClient(
+                tenant_id=self.settings.powerbi_tenant_id,
+                client_id=self.settings.powerbi_client_id,
+                client_secret=self.settings.powerbi_client_secret,
+            )
+        return MockSemanticHealthClient()
 
     def build_retry_store(self, path: Path | None = None):
         """Where postponed retries live.
