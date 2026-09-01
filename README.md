@@ -296,6 +296,8 @@ tests/                 The offline suite; test_hardening.py pins regressions
 | Which Foundry features are native vs. hand-rolled? | [`docs/foundry-native-architecture.md`](docs/foundry-native-architecture.md) |
 | What has to exist in the tenant first? | [`docs/provisioning.md`](docs/provisioning.md) |
 | How do I run it live, end to end? | [`docs/run-sheet.md`](docs/run-sheet.md) |
+| How do I adapt it to my failures and my tools? | [`docs/customization.md`](docs/customization.md) |
+| What runs on a schedule, and how do I turn it off? | [`docs/operations.md`](docs/operations.md) |
 | Why this model, and what if it is unavailable? | [`docs/model-selection.md`](docs/model-selection.md) |
 | Common questions | [`docs/faq.md`](docs/faq.md) |
 | What do I hand over afterwards, and what must not go in it? | [`docs/handoff.md`](docs/handoff.md) |
