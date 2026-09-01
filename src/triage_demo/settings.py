@@ -92,11 +92,15 @@ class Settings(BaseSettings):
     #: The detector's off switch. Configuration rather than routine state,
     #: because `azd deploy` re-enables a disabled routine from azure.yaml.
     silent_sweep_enabled: bool = True
-    #: Probe configuration. A list of dicts; see detectors/silent_failures.py.
-    #: Empty means the detector has nothing to watch and does nothing, which is
-    #: the correct default for a system that has not been told what "fresh"
-    #: means for a given model.
-    silent_health_probes: list[dict] = Field(default_factory=list)
+    #: Probe configuration, as raw JSON. Deliberately typed ``str`` rather than
+    #: ``list[dict]``: pydantic-settings JSON-decodes complex annotations inside
+    #: the environment source, *before* any validator runs, so an unset variable
+    #: ("") raised SettingsError at import and the container never started. That
+    #: took mail triage, approvals and remediation down over one empty string
+    #: belonging to an optional detector. A plain string is never decoded, so
+    #: parsing happens in ``load_probes`` where a bad value disables only the
+    #: detector.
+    silent_health_probes: str = ""
     # The URL behind the card's Approve/Decline buttons. An incoming webhook
     # has no bot behind it, so Action.Submit does nothing; the buttons have to
     # be links to something that records the decision. Empty means the card

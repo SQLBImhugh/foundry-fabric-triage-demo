@@ -29,6 +29,7 @@ nothing, and only a condition that survives confirmation becomes a finding.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -376,17 +377,42 @@ class SilentFailureScanner:
 
 
 def load_probes(raw: Any) -> list[HealthProbe]:
-    """Read probe configuration, ignoring anything malformed rather than failing.
+    """Read probe configuration, disabling only the detector when it is wrong.
 
-    One bad probe entry must not stop the other models being checked -- a
-    detector that refuses to start because of a typo is a detector that is off.
+    Accepts the raw JSON string that arrives from the environment, or an
+    already-parsed list. Nothing here raises: a typo in detector configuration
+    must never stop the agent starting, because the same process also handles
+    mail triage, approvals and remediation. The proportionate response is a
+    detector that watches nothing and says so in the log.
+
+    That is not theoretical. An unset ``SILENT_HEALTH_PROBES`` once crashed the
+    container at import, and every capability went down with it.
     """
-    if not isinstance(raw, list):
+    if raw is None:
         return []
+
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return []
+        try:
+            raw = json.loads(text)
+        except json.JSONDecodeError:
+            logger.error(
+                "SILENT_HEALTH_PROBES is not valid JSON, so the silent-failure "
+                "detector will watch nothing. Everything else is unaffected."
+            )
+            return []
+
+    if not isinstance(raw, list):
+        logger.error("SILENT_HEALTH_PROBES must be a JSON list; watching nothing.")
+        return []
+
     probes: list[HealthProbe] = []
     for entry in raw:
         try:
             probes.append(HealthProbe.from_dict(entry))
         except Exception as exc:  # noqa: BLE001
+            # One bad probe must not stop the other models being checked.
             logger.warning("Skipping unreadable probe config (%s)", type(exc).__name__)
     return probes

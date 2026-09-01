@@ -14,6 +14,7 @@ stay quiet.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -406,6 +407,42 @@ def test_no_configuration_means_no_probes() -> None:
     assert load_probes([]) == []
 
 
+@pytest.mark.parametrize("raw", ["", "   ", None])
+def test_an_unset_probe_variable_does_not_stop_the_agent_starting(raw) -> None:
+    """The whole agent died at import because of one empty string.
+
+    pydantic-settings JSON-decodes complex annotations inside the environment
+    source, before any validator runs, so an unset SILENT_HEALTH_PROBES raised
+    SettingsError at import and the container never reached readiness. Mail
+    triage, approvals and remediation all went down for an optional detector
+    that had no configuration.
+
+    The field is therefore a plain string, parsed here where being wrong
+    disables only the detector.
+    """
+    assert load_probes(raw) == []
+
+
+def test_malformed_probe_configuration_disables_only_the_detector() -> None:
+    """A typo in detector config must not take the rest of the system with it."""
+    assert load_probes("{not json") == []
+    assert load_probes('{"not": "a list"}') == []
+
+
+def test_valid_probe_json_is_parsed() -> None:
+    probes = load_probes(
+        '[{"name":"p","workspace_id":"w","dataset_id":"d","table":"T"}]'
+    )
+    assert [p.name for p in probes] == ["p"]
+
+
+def test_settings_accept_an_empty_probe_variable() -> None:
+    """The exact shape that crashed the container."""
+    from triage_demo.settings import Settings
+
+    assert load_probes(Settings(silent_health_probes="").silent_health_probes) == []
+
+
 # ---------------------------------------------------------------------------
 # End to end through the runner
 # ---------------------------------------------------------------------------
@@ -421,16 +458,18 @@ async def test_the_sweep_is_silent_when_nothing_is_configured(runner) -> None:
 
 
 async def test_a_confirmed_finding_becomes_an_incident_and_one_card(runner) -> None:
-    runner.settings.silent_health_probes = [
-        {
-            "name": "sales-freshness",
-            "workspace_id": "ws-1",
-            "dataset_id": "ds-1",
-            "table": "FactSales",
-            "date_column": "BusinessDate",
-            "report_name": "Completions Daily Rollup",
-        }
-    ]
+    runner.settings.silent_health_probes = json.dumps(
+        [
+            {
+                "name": "sales-freshness",
+                "workspace_id": "ws-1",
+                "dataset_id": "ds-1",
+                "table": "FactSales",
+                "date_column": "BusinessDate",
+                "report_name": "Completions Daily Rollup",
+            }
+        ]
+    )
     runner._health_client = MockSemanticHealthClient(max_date="2026-01-01", row_count=10_000)
     runner.build_health_client = lambda: runner._health_client  # type: ignore[method-assign]
 
@@ -453,9 +492,9 @@ async def test_a_confirmed_finding_becomes_an_incident_and_one_card(runner) -> N
 
 async def test_the_detector_can_be_switched_off_in_configuration(runner) -> None:
     """The off switch cannot live in routine state: a deploy re-enables it."""
-    runner.settings.silent_health_probes = [
-        {"name": "p", "workspace_id": "w", "dataset_id": "d", "table": "T"}
-    ]
+    runner.settings.silent_health_probes = json.dumps(
+        [{"name": "p", "workspace_id": "w", "dataset_id": "d", "table": "T"}]
+    )
     runner.settings.silent_sweep_enabled = False
 
     assert await runner.silent_sweep(now=NOW) == []
