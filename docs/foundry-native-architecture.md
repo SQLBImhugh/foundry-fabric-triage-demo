@@ -248,19 +248,19 @@ regardless.
 
 | Component | Mechanism | Status |
 |---|---|---|
-| Trigger | **Routine** (`azd ai routine`) — schedule or custom event | Not yet built |
+| Trigger | **Routine** (`azd ai routine`) — schedule or custom event | Built; declared in `azure.yaml` |
 | Inbox read | **Graph `Mail.Read` (application)** — no user, no stored refresh token | **Verified live** |
 | Mailbox scoping | Exchange **`ApplicationAccessPolicy`** — restrict to one mailbox | **Required**, not yet applied |
-| Orchestrator | **Hosted agent** — controller loop, containerised | Not yet built |
+| Orchestrator | **Hosted agent** — controller loop, containerised | Built and deployed |
 | Triage → DQ handoff | `responses` + `agent_reference` | **Verified** |
 | Data Quality agent | **Prompt agent**, own identity + version | **Verified** |
 | Duplicate evidence | Deterministic scan in the orchestrator | **Verified** |
-| Power BI refresh | **`openapi`** tool w/ `managed_identity` auth | Not yet built |
+| Power BI refresh | **`openapi`** tool w/ `managed_identity` auth | Not used — refresh goes through our own client, so the controller can charge the budget and check preconditions before the call |
 | Teams notify | **Workflows webhook** (no app-only channel post exists) | Built |
 | Content safety | **Guardrails** — jailbreak + XPIA | **Verified on by default** |
 | Policy / budgets | `PolicyLedger` — stays custom | **Verified enforced** |
-| Tracing | Auto-injected when project linked to App Insights | Not yet wired |
-| Regression | pytest (122) + Foundry evaluations | Partly built |
+| Tracing | Auto-injected when project linked to App Insights | Wired — spans carry metadata only |
+| Regression | the offline pytest suite + Foundry evaluations | Partly built |
 
 ### Rejected, and why
 

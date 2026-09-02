@@ -57,3 +57,34 @@ def required(name: str, purpose: str) -> str:
 
 def optional(name: str, default: str = "") -> str:
     return os.environ.get(name, "").strip() or default
+
+
+#: Resources these scripts ask for tokens against. Named rather than pasted, so
+#: a typo is an AttributeError at import instead of a 401 several calls later.
+GRAPH = "https://graph.microsoft.com"
+POWER_BI = "https://analysis.windows.net/powerbi/api"
+FABRIC = "https://api.fabric.microsoft.com"
+FOUNDRY = "https://ai.azure.com"
+
+
+def az_token(resource: str) -> str:
+    """Get an access token from the signed-in Azure CLI session.
+
+    ``shell=True`` is required on Windows: ``az`` is a ``.cmd`` shim, not a
+    real executable, so a direct spawn raises FileNotFoundError. This was
+    copy-pasted into five scripts, each of which had to rediscover that.
+    """
+    import subprocess
+
+    out = subprocess.run(
+        ["az", "account", "get-access-token", "--resource", resource,
+         "--query", "accessToken", "-o", "tsv"],
+        capture_output=True, text=True, check=True, shell=True,
+    )
+    token = out.stdout.strip()
+    if not token:
+        sys.exit(
+            f"Could not get a token for {resource}.\n"
+            "  Run `az login` and confirm the right tenant with `az account show`."
+        )
+    return token

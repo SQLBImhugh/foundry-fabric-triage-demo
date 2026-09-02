@@ -19,7 +19,7 @@ Writes to `handoff/`, which is gitignored — it is generated, not source.
 | Agent definitions | `register_foundry_agents.py --print-definitions` | The exact registered shape, including tool schemas and model |
 | Prompts | `src/triage_demo/agents/prompts/` | What the agents were actually told |
 | Tool schemas | `triage-demo tools` | The complete action surface, and therefore the blast radius |
-| Adaptive Card payload | `triage-demo teams-preview --json` | What a notification looks like before wiring Teams |
+| Adaptive Card payload | `triage-demo teams-preview --json` | The exact payload posted to Teams, without needing the webhook |
 | Config template | `.env.example` | Every knob, with none of the values |
 | Architecture | `docs/hosted-architecture.md` | What runs where and which identity does it |
 | Model comparison | `docs/model-selection.md` | Why this model, and the fallback |

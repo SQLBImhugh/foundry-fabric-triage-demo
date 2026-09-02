@@ -7,7 +7,7 @@ end. The Foundry routine that should trigger it on a schedule is registered and
 enabled but does not fire — a preview defect, documented in
 `docs/hosted-architecture.md`; any external scheduler calling the agent endpoint
 gives unattended operation today.
-287 tests green and still fully offline; the mock path remains the rehearsal
+The full offline suite is green and still fully offline; the mock path remains the rehearsal
 fallback. See `docs/hosted-architecture.md` for what each identity can actually
 reach — including the things that only surfaced by trying them.
 
@@ -21,6 +21,10 @@ pause and take questions mid-flow.
 
 ### In scope
 
+> This section records the **original** scope. It has since grown: there are now
+> nine scenarios, human approval is built, and a silent-failure detector was
+> added. See the delivered table below and `docs/scope-silent-failures.md`.
+
 The two scenarios as specified, plus three additions that are cheap to build and
 change the nature of the conversation:
 
@@ -33,6 +37,9 @@ change the nature of the conversation:
 | 4 | Unlisted action → never dispatched | **Added** | Bounded blast radius |
 
 ### Explicitly out of scope
+
+> As originally scoped. **The human-involvement branch was later built** —
+> scenarios 5 and 6, `approvals.py`, and a Teams card a person answers.
 
 Per the requirements: Enterprise vs. non-Enterprise routing, the Enablement and
 intake paths, Analytics Apps, the human-involvement branch, and any remediation
@@ -85,7 +92,7 @@ Everything runs with no tenant, no Azure login, no network.
 | OTel GenAI spans with no-op fallback | `src/triage_demo/observability.py` |
 | 9 scenarios with machine-checked assertions | `scenarios/` |
 | CLI with live event rendering | `src/triage_demo/cli.py` |
-| 287 tests | `tests/` |
+| The offline suite | `tests/` |
 
 **Exit criteria (met)**: all scenarios pass their assertions offline;
 `ruff check` clean; every scenario produces the same outcome, the same tool
@@ -445,7 +452,7 @@ demo. They belong in the production table above, not in Phase 1.
 |---|---|
 | Dedup lookup and record are not an atomic claim, so two concurrent identical alerts could both remediate | The demo is single-process and sequential. In production this needs a lease or a unique-constraint claim per signature — it is listed under **Policy** and **Dedup** in the production table |
 | Tier-1 prerequisites (known-incident check, DQ consult, history review) are enforced by the prompt, not the dispatcher | Deliberate: the model classifies, the controller constrains *which actions are permitted*. A misclassification cannot produce an action that was not already allowed. Making the ordering itself deterministic is a reasonable production hardening step and a defensible design conversation to have in the room |
-| No `watch` command consuming a live inbox; `GraphInbox` is unreachable from the CLI | Phase 3 work. Scenarios deliberately load a fixed message so they stay reproducible |
+| No `watch` command consuming a live inbox; `GraphInbox` is unreachable from the CLI | **Since resolved.** `triage-demo watch` exists and the hosted controller drains a real mailbox. Scenarios still load a fixed message so they stay reproducible |
 | Wall-clock is checked between steps, so a hung provider is never interrupted mid-call | Needs a per-await timeout wrapper. Real, and listed under **Failure modes** in the production table |
 | Connected-agent mode is not end-to-end runnable | Documented explicitly rather than fixed — see Phase 4. Requires exposing the scan as a server-callable tool |
 

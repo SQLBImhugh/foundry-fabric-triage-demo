@@ -49,9 +49,9 @@ scoped decision — redacted, one tenant, failure paths, capped retention.
 outcome is persisted:
 
 ```
-resolved · flagged_data_quality · duplicate_suppressed · needs_human
-declared_failed · agent_crashed · timed_out · budget_exceeded
-max_turns_exceeded · policy_blocked
+resolved · flagged_data_quality · duplicate_suppressed · deferred_retry
+approval_denied · needs_human · declared_failed · agent_crashed
+timed_out · budget_exceeded · max_turns_exceeded · policy_blocked
 ```
 
 Run `triage-demo incidents` and show the refusal from scenario 3, flagged
@@ -226,7 +226,7 @@ signatures, redaction, duplicate detection, policy — are tested directly. And 
 every scenario runs end to end offline in CI, so a broken demo fails a test rather
 than failing in front of a customer.
 
-90 tests, no network.
+the offline suite, no network.
 
 ### "Why is the Data Quality agent separate? It's one function."
 

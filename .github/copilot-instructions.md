@@ -48,32 +48,40 @@ azd ai agent monitor bi-triage-controller
 3. **Every tool is on an allowlist** (`REMEDIATION_ACTIONS`, `REPORTING_ACTIONS`
    or `DIAGNOSTIC_ACTIONS`). Anything else is refused before dispatch. That is
    the property the whole demo rests on.
-4. **Deterministic evidence outranks model output.** If a model claim and a scan
+4. **An approval is only a yes if it is explicit, fingerprint-matched,
+   unexpired and unused.** Everything else -- timeout, error, malformed reply,
+   no gate configured -- is a no. Silence never reads as consent.
+5. **A denial must not consume the remediation budget.** Otherwise one "no"
+   silently disarms the agent for the rest of the incident.
+6. **Deterministic evidence outranks model output.** If a model claim and a scan
    disagree, the scan wins and the disagreement is logged.
-5. **Redaction stays inside the store boundary.** Never move it to call sites; a
+7. **Redaction stays inside the store boundary.** Never move it to call sites; a
    call site can forget.
-6. **Every terminal outcome is persisted**, including crashes and refusals.
-7. **Spans carry metadata only.** Never attach prompt or completion content.
-8. **The inbox filter is a security control.** An agent that acts on every
+8. **Every terminal outcome is persisted**, including crashes and refusals.
+9. **Spans carry metadata only.** Never attach prompt or completion content.
+10. **The inbox filter is a security control.** An agent that acts on every
    message is steerable by anyone who can email it. Never widen the filter to
    make the demo find something — send a matching message instead.
-9. **Identity claims are read from the directory, never configured.** A
+11. **Identity claims are read from the directory, never configured.** A
    hardcoded claim about security posture will eventually be false silently.
-10. **Grant permissions to the component that acts, not the one that reasons.**
+12. **Grant permissions to the component that acts, not the one that reasons.**
     The prompt agents hold nothing. If a reasoning agent seems to need a
     permission, the design is wrong.
-11. **Tools fail loudly rather than return something interpretable.** Calling
+13. **Tools fail loudly rather than return something interpretable.** Calling
     Power BI with an empty id returned 404, and the model turned that into a
     confident, wrong conclusion.
-12. **Never weaken a policy limit to make a scenario pass** — change the
+14. **Scenarios are reproducible.** Same input, same tool sequence, same
+    numbers. When a live model and the mock diverge, make the *controller*
+    decide so both agree.
+15. **Never weaken a policy limit to make a scenario pass** — change the
     scenario.
-13. **The walkthrough pages stay self-contained.** The SharePoint/Teams preview
+16. **The walkthrough pages stay self-contained.** The SharePoint/Teams preview
     drops external CSS and images without reporting it. After changing a
     screenshot or the stylesheet, run `scripts/inline_assets.py`.
-14. **State that must survive an invocation goes in a store, never on an
+17. **State that must survive an invocation goes in a store, never on an
     object.** A hosted agent is rebuilt for every request, so an instance
     attribute is always empty on arrival.
-15. **An incident is announced once, not once per occurrence.** Enforced in the
+18. **An incident is announced once, not once per occurrence.** Enforced in the
     controller against `notified_count`, never in prompt wording.
 
 ## Style

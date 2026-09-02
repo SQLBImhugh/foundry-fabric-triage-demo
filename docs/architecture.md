@@ -325,9 +325,9 @@ The hosted agent answers `silent sweep` as a second sentinel alongside `sweep`.
 Every terminal outcome is persisted:
 
 ```
-resolved · flagged_data_quality · duplicate_suppressed · needs_human
-declared_failed · agent_crashed · timed_out · budget_exceeded
-max_turns_exceeded · policy_blocked
+resolved · flagged_data_quality · duplicate_suppressed · deferred_retry
+approval_denied · needs_human · declared_failed · agent_crashed
+timed_out · budget_exceeded · max_turns_exceeded · policy_blocked
 ```
 
 The original production gate was `status == "fixed"`. Ten Foundry agent

@@ -9,22 +9,22 @@ from __future__ import annotations
 
 import base64
 import json
-import subprocess
 import sys
 import time
 
 import httpx
+from _tenant import az_token, required
 
-WS = open(r"C:\Users\mhugh\AppData\Local\Temp\bitriage_ws.txt").read().strip()
+# Read from configuration like every other operational script. This previously
+# read a hardcoded path under one developer's Windows profile, at import time,
+# so the module could not even be imported on anyone else's machine -- and it
+# put a username into a public repository.
+WS = required("POWERBI_WORKSPACE_ID", "the workspace the failing model is created in")
 NAME = "Completions Daily Rollup"
 
 
 def token(resource: str) -> str:
-    return subprocess.run(
-        ["az", "account", "get-access-token", "--resource", resource,
-         "--query", "accessToken", "-o", "tsv"],
-        capture_output=True, text=True, check=True, shell=True,
-    ).stdout.strip()
+    return az_token(resource)
 
 
 def b64(obj: dict | str) -> str:
@@ -105,4 +105,6 @@ ds = httpx.get(
 for d in ds.get("value", []):
     print(f"dataset: {d['id']}  {d['name']}")
     if d["name"] == NAME:
-        open(r"C:\Users\mhugh\AppData\Local\Temp\bitriage_dataset.txt", "w").write(d["id"])
+        # Printed rather than written to a machine-local temp file, so the
+        # operator can put it wherever their configuration lives.
+        print(f"\nSet POWERBI_DATASET_ID={d['id']} to point the demo at this model.")
