@@ -48,7 +48,10 @@ triage-demo approvals            # actions awaiting a human decision
 triage-demo retries              # postponed retries and when they are due
 triage-demo retries --drain      # perform the ones whose window has passed
 triage-demo health               # scan for failures that raised no alert
+triage-demo health --probes      # what is watched, and how
 triage-demo health --baselines   # what healthy looked like last time
+triage-demo health --preflight   # configuration that would silently detect nothing
+triage-demo health --accept all  # accept a planned change as the new normal
 triage-demo flags                # data quality findings, reported not fixed
 triage-demo preflight            # configured vs missing, printing no secret values
 ```

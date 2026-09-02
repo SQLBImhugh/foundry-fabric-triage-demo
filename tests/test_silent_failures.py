@@ -14,10 +14,12 @@ stay quiet.
 
 from __future__ import annotations
 
+import io
 import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from rich.markup import escape
 
 from triage_demo.detectors.silent_failures import (
     HealthProbe,
@@ -630,3 +632,382 @@ def test_a_fault_without_a_hint_still_says_something() -> None:
 def _fault_summary_plain() -> str:
     from triage_demo.runner import _fault_summary
     return _fault_summary("HTTP 500: InternalServerError, something broke upstream")
+
+# ---------------------------------------------------------------------------
+# Schema drift (Phase 3)
+# ---------------------------------------------------------------------------
+
+SCHEMA_V1 = ("column:FactSales[Amount]", "column:FactSales[BusinessDate]", "measure:Net Sales")
+
+
+@pytest.mark.asyncio
+async def test_the_first_schema_sighting_is_a_baseline_not_a_finding() -> None:
+    client = MockSemanticHealthClient(max_date=_yesterday(), schema=SCHEMA_V1)
+    store = InMemorySemanticHealthStore()
+    finding = await _scanner(client, store).scan(_probe(watch_schema=True))
+
+    assert finding.status == "healthy"
+    state = store.get("ws-1", "ds-1", "sales-freshness")
+    assert tuple(state.last_schema) == tuple(sorted(SCHEMA_V1))
+
+
+@pytest.mark.asyncio
+async def test_a_removed_column_is_reported() -> None:
+    """Nothing in Power BI announces this, and every report built on it breaks."""
+    store = InMemorySemanticHealthStore()
+    probe = _probe(watch_schema=True, confirmations=1)
+
+    first = MockSemanticHealthClient(max_date=_yesterday(), schema=SCHEMA_V1)
+    await _scanner(first, store).scan(probe)
+
+    dropped = tuple(e for e in SCHEMA_V1 if "Amount" not in e)
+    second = MockSemanticHealthClient(max_date=_yesterday(), schema=dropped)
+    finding = await _scanner(second, store).scan(probe)
+
+    assert finding.kind == "schema_drift"
+    assert finding.status == "confirmed"
+    assert "FactSales[Amount]" in finding.detail
+
+
+@pytest.mark.asyncio
+async def test_added_columns_are_not_drift() -> None:
+    """The negative control that decides whether anyone keeps this switched on.
+
+    Models gain columns and measures constantly. A detector that reports every
+    addition fires on ordinary development, and a detector that fires on
+    ordinary development gets turned off -- taking the removal case with it.
+    """
+    store = InMemorySemanticHealthStore()
+    probe = _probe(watch_schema=True, confirmations=1)
+
+    first = MockSemanticHealthClient(max_date=_yesterday(), schema=SCHEMA_V1)
+    await _scanner(first, store).scan(probe)
+
+    grown = SCHEMA_V1 + ("column:FactSales[Discount]", "measure:Gross Sales")
+    second = MockSemanticHealthClient(max_date=_yesterday(), schema=grown)
+    finding = await _scanner(second, store).scan(probe)
+
+    assert finding.status == "healthy"
+    # The baseline moves on, so a later removal is measured against reality.
+    assert tuple(store.get("ws-1", "ds-1", "sales-freshness").last_schema) == tuple(sorted(grown))
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_schema_is_never_reported_as_deletion() -> None:
+    """"I could not look" must not become "everything was deleted"."""
+    store = InMemorySemanticHealthStore()
+    probe = _probe(watch_schema=True, confirmations=1)
+
+    first = MockSemanticHealthClient(max_date=_yesterday(), schema=SCHEMA_V1)
+    await _scanner(first, store).scan(probe)
+
+    blind = MockSemanticHealthClient(
+        max_date=_yesterday(), schema_ok=False, schema_error="HTTP 401"
+    )
+    finding = await _scanner(blind, store).scan(probe)
+
+    assert finding.kind != "schema_drift"
+    assert finding.status == "healthy"
+    # The baseline is untouched, so the next readable sweep still compares.
+    assert tuple(store.get("ws-1", "ds-1", "sales-freshness").last_schema) == tuple(sorted(SCHEMA_V1))
+
+
+@pytest.mark.asyncio
+async def test_schema_is_not_queried_unless_asked_for() -> None:
+    """It costs a second query per sweep against the capacity being watched."""
+    client = MockSemanticHealthClient(max_date=_yesterday(), schema=SCHEMA_V1)
+    await _scanner(client, InMemorySemanticHealthStore()).scan(_probe(watch_schema=False))
+
+    assert not any("INFO.VIEW" in c["query"] for c in client.calls)
+
+
+@pytest.mark.asyncio
+async def test_stale_data_is_reported_before_schema_drift() -> None:
+    """A model that stopped loading is the more urgent report."""
+    store = InMemorySemanticHealthStore()
+    probe = _probe(watch_schema=True, confirmations=1)
+
+    first = MockSemanticHealthClient(max_date=_yesterday(), schema=SCHEMA_V1)
+    await _scanner(first, store).scan(probe)
+
+    both_wrong = MockSemanticHealthClient(
+        max_date="2020-01-01", schema=tuple(e for e in SCHEMA_V1 if "Amount" not in e)
+    )
+    finding = await _scanner(both_wrong, store).scan(probe)
+
+    assert finding.kind == "stale"
+
+def test_probe_spans_carry_no_observed_values() -> None:
+    """Spans are metadata only.
+
+    Traces are retained and widely readable inside a tenant, and a watermark or
+    a row count is customer data. The status is enough to see the detector
+    working; the numbers belong in the store, not the trace.
+    """
+    import inspect
+
+    from triage_demo.detectors import silent_failures as sf
+
+    source = inspect.getsource(sf.SilentFailureScanner.scan)
+    assert "tool_span" in source
+    for leaked in ("max_date", "row_count", "result.", "detail"):
+        assert f'span.set("probe.{leaked}' not in source
+    # Whatever else changes, the values themselves must not be attached.
+    assert "finding.observed" not in source
+    assert "finding.detail" not in source
+
+# ---------------------------------------------------------------------------
+# Circuit breaker (Phase 5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_probe_that_never_works_is_parked() -> None:
+    """Observed: a Direct Lake probe reached twelve consecutive 401s.
+
+    App-only callers cannot query Direct Lake at all, so every retry was pure
+    cost against the capacity being watched.
+    """
+    store = InMemorySemanticHealthStore()
+    probe = _probe(max_consecutive_errors=3)
+    blind = MockSemanticHealthClient(ok=False, error="HTTP 401", detector_fault=True)
+
+    for _ in range(3):
+        assert (await _scanner(blind, store).scan(probe)).status == "detector_fault"
+
+    calls_before = len(blind.calls)
+    finding = await _scanner(blind, store).scan(probe)
+
+    assert finding.status == "parked"
+    assert len(blind.calls) == calls_before, "a parked probe must stop querying"
+
+
+@pytest.mark.asyncio
+async def test_a_parked_probe_tries_again_after_the_cooldown() -> None:
+    """Reopened by time, not by anyone remembering to."""
+    store = InMemorySemanticHealthStore()
+    probe = _probe(max_consecutive_errors=2, circuit_cooldown_minutes=60)
+    blind = MockSemanticHealthClient(ok=False, error="HTTP 401", detector_fault=True)
+
+    for _ in range(2):
+        await _scanner(blind, store).scan(probe)
+    assert (await _scanner(blind, store).scan(probe)).status == "parked"
+
+    healed = MockSemanticHealthClient(max_date=_yesterday())
+    later = NOW + timedelta(minutes=61)
+    finding = await _scanner(healed, store, now=later).scan(probe)
+
+    assert finding.status == "healthy"
+    assert healed.calls, "the cooldown must allow a real attempt"
+
+
+@pytest.mark.asyncio
+async def test_a_working_probe_is_never_parked() -> None:
+    """The breaker must not fire on a detector that can see."""
+    store = InMemorySemanticHealthStore()
+    client = MockSemanticHealthClient(max_date=_yesterday())
+    for _ in range(8):
+        assert (await _scanner(client, store).scan(_probe())).status == "healthy"
+
+
+@pytest.mark.asyncio
+async def test_one_success_clears_the_breaker() -> None:
+    """A fixed permission should not leave the probe parked until a timer ends."""
+    store = InMemorySemanticHealthStore()
+    probe = _probe(max_consecutive_errors=3)
+    blind = MockSemanticHealthClient(ok=False, error="HTTP 401", detector_fault=True)
+    for _ in range(2):
+        await _scanner(blind, store).scan(probe)
+
+    await _scanner(MockSemanticHealthClient(max_date=_yesterday()), store).scan(probe)
+    state = store.get("ws-1", "ds-1", "sales-freshness")
+
+    assert state.consecutive_errors == 0
+    assert state.circuit_opened_at == ""
+
+# ---------------------------------------------------------------------------
+# Sweep lease and pacing (Phase 2 / 5)
+# ---------------------------------------------------------------------------
+
+
+def test_a_second_sweeper_is_refused_the_lease() -> None:
+    """Two instances confirming the same probe would defeat suspect-then-confirm.
+
+    Each would increment the suspect count for one real occurrence, so a rule
+    that exists to prevent false positives would start producing them.
+    """
+    store = InMemorySemanticHealthStore()
+
+    assert store.try_acquire_lease("silent-sweep", "instance-a", 300)
+    assert not store.try_acquire_lease("silent-sweep", "instance-b", 300)
+
+
+def test_the_lease_is_reusable_by_its_holder() -> None:
+    """A retry from the same instance must not deadlock against itself."""
+    store = InMemorySemanticHealthStore()
+    assert store.try_acquire_lease("silent-sweep", "instance-a", 300)
+    assert store.try_acquire_lease("silent-sweep", "instance-a", 300)
+
+
+def test_an_expired_lease_does_not_block_for_ever() -> None:
+    """An instance that dies mid-sweep must not stop every future sweep."""
+    store = InMemorySemanticHealthStore()
+    assert store.try_acquire_lease("silent-sweep", "crashed", 0)
+
+    assert store.try_acquire_lease("silent-sweep", "instance-b", 300)
+
+
+def test_releasing_is_owner_scoped() -> None:
+    """A loser must not be able to release the winner's lease."""
+    store = InMemorySemanticHealthStore()
+    store.try_acquire_lease("silent-sweep", "instance-a", 300)
+
+    store.release_lease("silent-sweep", "instance-b")
+
+    assert not store.try_acquire_lease("silent-sweep", "instance-c", 300)
+
+
+@pytest.mark.asyncio
+async def test_probes_are_paced_rather_than_run_together() -> None:
+    """executeQueries is throttled per user across every dataset.
+
+    A detector that trips that limit becomes the capacity incident it exists to
+    watch for, so the sweep is deliberately sequential.
+    """
+    client = MockSemanticHealthClient(max_date=_yesterday())
+    scanner = SilentFailureScanner(client, InMemorySemanticHealthStore(), now=NOW)
+    probes = [_probe(name=f"p{i}", dataset_id=f"ds-{i}") for i in range(3)]
+
+    await scanner.sweep(probes)
+
+    assert len(client.calls) == 3
+    assert [c["dataset_id"] for c in client.calls] == ["ds-0", "ds-1", "ds-2"]
+
+# ---------------------------------------------------------------------------
+# Maintenance calendars (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_weekday_model_is_not_stale_at_the_weekend() -> None:
+    """The false positive that arrives every Saturday and mutes the detector."""
+    sunday = datetime(2026, 8, 30, 9, 0, tzinfo=UTC)
+    assert sunday.isoweekday() == 7
+    friday_data = MockSemanticHealthClient(max_date="2026-08-28")
+    probe = _probe(load_weekdays=(1, 2, 3, 4, 5))
+
+    finding = await _scanner(friday_data, now=sunday).scan(probe)
+
+    assert finding.status == "healthy"
+
+
+@pytest.mark.asyncio
+async def test_a_weekday_model_is_still_stale_on_a_working_day() -> None:
+    """Negative control: the calendar must not silence a genuine failure.
+
+    By Tuesday, a Friday watermark has missed Monday and Tuesday.
+    """
+    tuesday = datetime(2026, 9, 1, 9, 0, tzinfo=UTC)
+    assert tuesday.isoweekday() == 2
+    friday_data = MockSemanticHealthClient(max_date="2026-08-28")
+    probe = _probe(load_weekdays=(1, 2, 3, 4, 5), confirmations=1)
+
+    finding = await _scanner(friday_data, now=tuesday).scan(probe)
+
+    assert finding.kind == "stale"
+
+
+def test_probe_watermarks_survive_rich_markup() -> None:
+    """``table[column]`` is DAX; Rich reads it as a style tag and eats it.
+
+    The column name is the part somebody is checking, so losing it silently
+    makes the listing worse than useless.
+    """
+    from rich.console import Console
+
+    from triage_demo.cli import build_parser  # noqa: F401  (import smoke)
+
+    console = Console(file=io.StringIO(), width=200, force_terminal=False)
+    console.print(escape("dim_date[date]"))
+
+    assert "dim_date[date]" in console.file.getvalue()
+
+# ---------------------------------------------------------------------------
+# Probe preflight (Phase 5)
+# ---------------------------------------------------------------------------
+
+
+def _preflight(probes_json: str) -> tuple[int, str]:
+    """Run `health --preflight` against a configuration, capturing its output.
+
+    ``settings`` and ``console`` are module globals in the CLI, so both are
+    swapped rather than passed -- Rich holds the stream it was built with, so
+    redirecting stdout alone captures nothing.
+    """
+    from rich.console import Console
+
+    from triage_demo import cli
+    from triage_demo.settings import Settings
+
+    args = cli.build_parser().parse_args(["health", "--preflight"])
+    buffer = io.StringIO()
+    original_settings, original_console = cli.settings, cli.console
+    cli.settings = Settings(silent_health_probes=probes_json, triage_tool_mode="mock")
+    cli.console = Console(file=buffer, width=200, force_terminal=False)
+    try:
+        code = cli.cmd_health(args)
+    finally:
+        cli.settings, cli.console = original_settings, original_console
+    return code, buffer.getvalue()
+
+
+def test_preflight_passes_a_sane_probe() -> None:
+    code, _ = _preflight(json.dumps([{
+        "name": "sales", "workspace_id": "ws", "dataset_id": "ds",
+        "table": "f", "date_table": "d", "date_column": "date",
+    }]))
+    assert code == 0
+
+
+def test_preflight_rejects_a_configuration_that_can_detect_nothing() -> None:
+    """The failure that matters: it looks like monitoring and reports nothing.
+
+    A probe with no ids never runs, and nothing else in the system will say so.
+    """
+    code, out = _preflight(json.dumps([
+        {"name": "c", "workspace_id": "", "dataset_id": "", "table": ""},
+    ]))
+    assert code == 1
+    assert "missing workspace or dataset id" in out
+
+
+def test_preflight_catches_duplicate_probes_on_one_model() -> None:
+    """State is keyed on workspace+dataset+name, so duplicates overwrite.
+
+    Neither probe accumulates history, so neither can ever confirm anything.
+    """
+    code, out = _preflight(json.dumps([
+        {"name": "a", "workspace_id": "ws", "dataset_id": "ds", "table": "f", "date_column": "d"},
+        {"name": "a", "workspace_id": "ws", "dataset_id": "ds", "table": "f", "date_column": "d"},
+    ]))
+    assert code == 1
+    assert "duplicate" in out
+
+
+def test_preflight_rejects_confirmations_that_would_announce_immediately() -> None:
+    """Suspect-then-confirm is the false-positive guard; 0 disables it."""
+    code, out = _preflight(json.dumps([
+        {"name": "a", "workspace_id": "ws", "dataset_id": "ds", "table": "f",
+         "date_column": "d", "confirmations": 0},
+    ]))
+    assert code == 1
+    assert "confirmations" in out
+
+
+def test_preflight_warns_when_staleness_is_not_watched() -> None:
+    """Not an error -- a row-count-only probe is legitimate -- but worth saying."""
+    code, out = _preflight(json.dumps([
+        {"name": "a", "workspace_id": "ws", "dataset_id": "ds", "table": "f"},
+    ]))
+    assert code == 0
+    assert "staleness is not watched" in out

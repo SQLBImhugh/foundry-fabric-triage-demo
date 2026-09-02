@@ -472,6 +472,31 @@ For Power BI:
 - Enable XMLA tenant and capacity settings before relying on metadata fingerprints.
 - Treat RLS/SSO datasets as unsupported for app-only Execute Queries unless a delegated design is explicitly chosen. A delegated design is not recommended for this unattended detector.
 
+## Build status
+
+Phases 1 to 5 are built. What was delivered differs from this plan in four
+places, each for a reason worth keeping:
+
+| Phase | State | Deviation from the plan below |
+|---|---|---|
+| 1 | Done | Built as a deterministic detector, **not** as the `scan_semantic_model_health` and `record_semantic_health_baseline` agent tools. A model asked whether a 60% row drop is acceptable will sometimes say yes; measured evidence has to outrank model output |
+| 2 | Done | — |
+| 3 | Done | Uses DAX `INFO.VIEW` over the existing read-only endpoint instead of XMLA. XMLA needs ADOMD or TOM, so in practice a .NET dependency and a Windows host; the controller runs in a Linux container. Only **removals** are reported, because a detector that fires on ordinary model development gets switched off |
+| 4 | Done | Probe configuration is an environment value rather than a file or table, so it deploys with the agent. Maintenance windows are expressed as `load_weekdays` rather than arbitrary calendars |
+| 5 | Done | Sweeps are paced and sequential rather than a concurrent queue: `executeQueries` is throttled per user across all datasets, so concurrency would make the detector the incident it watches for. Preflight validates configuration; live tenant checks are the sweep's own job |
+
+Two behaviours were added that this scope did not anticipate, both because they
+were needed in practice:
+
+- **A circuit breaker.** A probe against a Direct Lake model reached twelve
+  consecutive 401s, re-querying a model app-only callers are never permitted to
+  read. It is now parked after repeated faults and retried on a cooldown.
+- **A `date_table` option.** A star-schema fact table holds a date *key* and no
+  date, so freshness could not be expressed for it at all. The obvious
+  workaround — probe the date dimension — returned `2030-12-31` on a real model
+  whose data stopped in 2024, which would have reported a stale model as fresh
+  for ever.
+
 ## Phased build order and rough effort
 
 ### Phase 1: deterministic health scanner, one model

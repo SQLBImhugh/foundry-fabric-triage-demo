@@ -101,6 +101,56 @@ def _permission_hint(status: int, detail: str) -> str:
 
 
 
+@dataclass
+class SchemaReading:
+    """The model's shape at one moment, or why it could not be read.
+
+    Separate from ``ProbeResult`` because the two answer different questions
+    and fail independently: a model can be perfectly readable while its schema
+    query is refused, and reporting that as missing data would be wrong.
+    """
+
+    ok: bool
+    entries: tuple[str, ...] = ()
+    error: str = ""
+    detector_fault: bool = False
+    query: str = ""
+
+
+#: Visible columns and measures, as one query.
+#:
+#: Deliberately not XMLA. The scope for this called for ADOMD or TOM, which
+#: means a .NET dependency and, in practice, a Windows host -- the controller
+#: runs in a Linux container. ``INFO.VIEW`` returns the same names over the
+#: read-only endpoint the detector already holds, so schema drift costs one
+#: extra query rather than a second access path with its own permissions.
+#:
+#: Hidden objects are excluded on purpose: a key column being hidden is a
+#: modelling decision, not a change anyone reports on.
+SCHEMA_DAX = """EVALUATE
+UNION(
+    SELECTCOLUMNS(FILTER(INFO.VIEW.COLUMNS(), NOT [IsHidden]), "Kind", "column", "Name", [Table] & "[" & [Name] & "]"),
+    SELECTCOLUMNS(FILTER(INFO.VIEW.MEASURES(), NOT [IsHidden]), "Kind", "measure", "Name", [Name])
+)
+ORDER BY [Kind], [Name]"""
+
+
+def build_schema_dax() -> str:
+    """The schema probe. Takes no configuration, so nothing to escape."""
+    return SCHEMA_DAX
+
+
+def schema_entries(rows: list[dict[str, Any]]) -> tuple[str, ...]:
+    """Normalise the schema query's rows into comparable identifiers."""
+    out: list[str] = []
+    for row in rows:
+        kind = str(row.get("[Kind]") or row.get("Kind") or "").strip()
+        name = str(row.get("[Name]") or row.get("Name") or "").strip()
+        if name:
+            out.append(f"{kind}:{name}" if kind else name)
+    return tuple(sorted(set(out)))
+
+
 def build_probe_dax(
     *,
     table: str,
@@ -170,6 +220,8 @@ class SemanticModelHealthClient(Protocol):
         control_measures: tuple[str, ...] = (),
     ) -> ProbeResult: ...
 
+    async def read_schema(self, workspace_id: str, dataset_id: str) -> SchemaReading: ...
+
 
 @dataclass
 class MockSemanticHealthClient:
@@ -182,6 +234,9 @@ class MockSemanticHealthClient:
     error: str = ""
     detector_fault: bool = False
     latency_ms: int = 0
+    schema: tuple[str, ...] = ()
+    schema_ok: bool = True
+    schema_error: str = ""
     calls: list[dict[str, Any]] = field(default_factory=list)
 
     async def run_probe(
@@ -218,6 +273,17 @@ class MockSemanticHealthClient:
             control_totals=dict(self.control_totals),
             query=query,
         )
+
+    async def read_schema(self, workspace_id: str, dataset_id: str) -> SchemaReading:
+        query = build_schema_dax()
+        self.calls.append(
+            {"workspace_id": workspace_id, "dataset_id": dataset_id, "query": query}
+        )
+        if not self.schema_ok:
+            return SchemaReading(
+                ok=False, error=self.schema_error, detector_fault=True, query=query
+            )
+        return SchemaReading(ok=True, entries=tuple(sorted(self.schema)), query=query)
 
 
 class LiveSemanticHealthClient:
@@ -295,17 +361,16 @@ class LiveSemanticHealthClient:
         self._token_expires_at = time.time() + int(payload.get("expires_in", 3600))
         return self._token
 
-    async def run_probe(
-        self,
-        workspace_id: str,
-        dataset_id: str,
-        *,
-        table: str,
-        date_column: str = "",
-        date_table: str = "",
-        row_count_table: str = "",
-        control_measures: tuple[str, ...] = (),
-    ) -> ProbeResult:
+    async def _execute(
+        self, workspace_id: str, dataset_id: str, query: str
+    ) -> tuple[list[dict[str, Any]] | None, str, bool]:
+        """Run one DAX query. Returns (rows, error, detector_fault).
+
+        Shared by the data probe and the schema probe so the two cannot drift
+        apart on error handling. Which failures count as the detector's fault
+        rather than the data's is the classification this whole component rests
+        on, and writing it twice is how the two copies stop agreeing.
+        """
         import httpx
 
         if not (workspace_id or "").strip() or not (dataset_id or "").strip():
@@ -315,13 +380,6 @@ class LiveSemanticHealthClient:
                 "Cannot probe a semantic model without a workspace id and dataset id."
             )
 
-        query = build_probe_dax(
-            table=table,
-            date_column=date_column,
-            date_table=date_table,
-            row_count_table=row_count_table,
-            control_measures=control_measures,
-        )
         token = await self._get_token()
         url = f"{_API}/groups/{workspace_id}/datasets/{dataset_id}/executeQueries"
 
@@ -344,22 +402,53 @@ class LiveSemanticHealthClient:
             logger.warning(
                 "Semantic probe failed: HTTP %s %s", resp.status_code, detail[:200]
             )
-            return ProbeResult(
-                ok=False,
-                error=f"HTTP {resp.status_code}: {detail}{_permission_hint(resp.status_code, detail)}",
-                detector_fault=detector_fault,
-                query=query,
-            )
+            hint = _permission_hint(resp.status_code, detail)
+            return None, f"HTTP {resp.status_code}: {detail}{hint}", detector_fault
 
         try:
-            rows = resp.json()["results"][0]["tables"][0]["rows"]
+            return resp.json()["results"][0]["tables"][0]["rows"], "", False
         except (KeyError, IndexError, ValueError) as exc:
-            return ProbeResult(
+            return None, f"Unreadable probe response ({type(exc).__name__})", True
+
+    async def read_schema(self, workspace_id: str, dataset_id: str) -> SchemaReading:
+        query = build_schema_dax()
+        rows, error, fault = await self._execute(workspace_id, dataset_id, query)
+        if rows is None:
+            return SchemaReading(ok=False, error=error, detector_fault=fault, query=query)
+        entries = schema_entries(rows)
+        if not entries:
+            # An empty schema is never real. Treated as blindness rather than as
+            # "every column was deleted", which would be a spectacular and
+            # entirely wrong finding.
+            return SchemaReading(
                 ok=False,
-                error=f"Unreadable probe response ({type(exc).__name__})",
+                error="Schema query returned nothing.",
                 detector_fault=True,
                 query=query,
             )
+        return SchemaReading(ok=True, entries=entries, query=query)
+
+    async def run_probe(
+        self,
+        workspace_id: str,
+        dataset_id: str,
+        *,
+        table: str,
+        date_column: str = "",
+        date_table: str = "",
+        row_count_table: str = "",
+        control_measures: tuple[str, ...] = (),
+    ) -> ProbeResult:
+        query = build_probe_dax(
+            table=table,
+            date_column=date_column,
+            date_table=date_table,
+            row_count_table=row_count_table,
+            control_measures=control_measures,
+        )
+        rows, error, fault = await self._execute(workspace_id, dataset_id, query)
+        if rows is None:
+            return ProbeResult(ok=False, error=error, detector_fault=fault, query=query)
 
         if not rows:
             return ProbeResult(

@@ -25,7 +25,8 @@ import hashlib
 import json
 import logging
 import threading
-from dataclasses import asdict, dataclass, field
+import time
+from dataclasses import asdict, dataclass, field, fields
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
@@ -67,6 +68,13 @@ class ProbeState:
     #: cannot run is not evidence that the data is stale.
     consecutive_errors: int = 0
     last_error: str = ""
+    #: When this probe was parked for repeated failure. Empty when running.
+    circuit_opened_at: str = ""
+
+    #: The model's shape as last seen: sorted ``table[column]`` and measure
+    #: names. Only populated for probes that opt into schema watching, because
+    #: it costs an extra query per sweep.
+    last_schema: list[str] = field(default_factory=list)
 
     observations: int = 0
     updated_at: str = field(default_factory=_utcnow)
@@ -74,12 +82,27 @@ class ProbeState:
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
 
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> ProbeState:
+        """Rebuild from stored JSON, ignoring fields this version does not know.
+
+        ``ProbeState(**raw)`` raises on an unexpected key, which makes the store
+        unreadable the moment two versions of the agent share it -- a newer
+        instance writes a new field, an older one crashes reading its own
+        table. During a rolling deploy that is a detector-wide outage caused by
+        adding a field, so unknown keys are dropped instead.
+        """
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in raw.items() if k in known})
+
 
 class SemanticHealthStore(Protocol):
     def get(self, workspace_id: str, dataset_id: str, probe_name: str) -> ProbeState | None: ...
     def put(self, state: ProbeState) -> None: ...
     def all_states(self) -> list[ProbeState]: ...
     def reset(self) -> None: ...
+    def try_acquire_lease(self, name: str, owner: str, ttl_seconds: int) -> bool: ...
+    def release_lease(self, name: str, owner: str) -> None: ...
 
 
 class InMemorySemanticHealthStore:
@@ -93,11 +116,33 @@ class InMemorySemanticHealthStore:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._items: dict[str, dict[str, Any]] = {}
+        self._leases: dict[str, tuple[str, float]] = {}
+
+    def try_acquire_lease(self, name: str, owner: str, ttl_seconds: int) -> bool:
+        """Claim the right to sweep. In one process this is exact.
+
+        Correct here and insufficient in the hosted shape, which is why the
+        Azure Table store overrides it: two container instances woken by the
+        same schedule would each hold their own dictionary and both proceed.
+        """
+        now = time.time()
+        with self._lock:
+            held = self._leases.get(name)
+            if held and held[0] != owner and held[1] > now:
+                return False
+            self._leases[name] = (owner, now + ttl_seconds)
+            return True
+
+    def release_lease(self, name: str, owner: str) -> None:
+        with self._lock:
+            held = self._leases.get(name)
+            if held and held[0] == owner:
+                del self._leases[name]
 
     def get(self, workspace_id: str, dataset_id: str, probe_name: str) -> ProbeState | None:
         with self._lock:
             raw = self._items.get(probe_key(workspace_id, dataset_id, probe_name))
-            return ProbeState(**raw) if raw else None
+            return ProbeState.from_dict(raw) if raw else None
 
     def put(self, state: ProbeState) -> None:
         state.updated_at = _utcnow()
@@ -108,7 +153,7 @@ class InMemorySemanticHealthStore:
 
     def all_states(self) -> list[ProbeState]:
         with self._lock:
-            return [ProbeState(**raw) for raw in self._items.values()]
+            return [ProbeState.from_dict(raw) for raw in self._items.values()]
 
     def reset(self) -> None:
         with self._lock:
@@ -180,6 +225,7 @@ class AzureTableSemanticHealthStore(InMemorySemanticHealthStore):
     """
 
     _PARTITION = "probe"
+    _LEASE_PARTITION = "lease"
 
     def __init__(
         self,
@@ -262,6 +308,84 @@ class AzureTableSemanticHealthStore(InMemorySemanticHealthStore):
                 state.probe_name,
                 type(exc).__name__,
             )
+
+    def try_acquire_lease(self, name: str, owner: str, ttl_seconds: int) -> bool:
+        """Claim the sweep across instances, using the table as the arbiter.
+
+        A hosted agent is rebuilt per request and a schedule can wake more than
+        one instance, so an in-process lock decides nothing. Two sweeps running
+        together would each increment ``suspect_count`` for the same probe and
+        confirm a finding on its first real occurrence -- turning the
+        suspect-then-confirm rule, which exists to stop false positives, into a
+        generator of them.
+
+        Insert-if-absent is the atomic primitive: whoever creates the row wins.
+        An expired row is taken over with an ETag match, so a late loser cannot
+        overwrite the winner.
+        """
+        if self._client is None:
+            return super().try_acquire_lease(name, owner, ttl_seconds)
+
+        from azure.core import MatchConditions
+        from azure.core.exceptions import (
+            ResourceExistsError,
+            ResourceModifiedError,
+            ResourceNotFoundError,
+        )
+
+        row = {
+            "PartitionKey": self._LEASE_PARTITION,
+            "RowKey": name,
+            "owner": owner,
+            "expires_at": time.time() + ttl_seconds,
+        }
+        try:
+            self._client.create_entity(row)
+            return True
+        except ResourceExistsError:
+            pass
+        except Exception as exc:  # pragma: no cover - transient table failure
+            # Cannot arbitrate, so do not sweep. Declining is safe; proceeding
+            # risks the double confirmation this exists to prevent.
+            logger.warning("Could not take sweep lease (%s); skipping", type(exc).__name__)
+            return False
+
+        try:
+            held = self._client.get_entity(self._LEASE_PARTITION, name)
+        except ResourceNotFoundError:  # pragma: no cover - released in between
+            return False
+
+        if str(held.get("owner")) != owner and float(held.get("expires_at", 0)) > time.time():
+            return False
+
+        try:
+            from azure.data.tables import UpdateMode
+
+            self._client.update_entity(
+                row,
+                mode=UpdateMode.REPLACE,
+                etag=held.metadata["etag"],
+                match_condition=MatchConditions.IfNotModified,
+            )
+            return True
+        except (ResourceModifiedError, KeyError):
+            return False
+        except Exception as exc:  # pragma: no cover - transient table failure
+            logger.warning("Could not renew sweep lease (%s); skipping", type(exc).__name__)
+            return False
+
+    def release_lease(self, name: str, owner: str) -> None:
+        if self._client is None:
+            super().release_lease(name, owner)
+            return
+        try:
+            held = self._client.get_entity(self._LEASE_PARTITION, name)
+            if str(held.get("owner")) == owner:
+                self._client.delete_entity(
+                    partition_key=self._LEASE_PARTITION, row_key=name
+                )
+        except Exception:  # pragma: no cover - the TTL releases it anyway
+            logger.debug("Could not release sweep lease %s", name)
 
     def _on_reset(self) -> None:
         if self._client is None:

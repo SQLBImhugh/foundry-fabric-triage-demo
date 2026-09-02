@@ -303,8 +303,23 @@ positives that get a detector muted.
   "date_column":"date",
   "report_name":"Sales invoices",
   "expected_lag_hours":24,
-  "min_absolute_drop":40}]
+  "min_absolute_drop":40,
+  "watch_schema":true,
+  "load_weekdays":[1,2,3,4,5]}]
 ```
+
+Check it before trusting it:
+
+```powershell
+triage-demo health --preflight   # mistakes that would silently detect nothing
+triage-demo health --probes      # what is watched, and how
+```
+
+`--preflight` exits non-zero on a configuration that cannot detect anything —
+a probe with no ids, a duplicate name on the same model (both overwrite the same
+baseline, so neither accumulates history), or `confirmations: 0`, which disables
+the guard against false positives. That failure mode is the dangerous one: it
+looks like monitoring and reports nothing, indefinitely.
 
 **Set `date_table` whenever the measured table holds a date *key* rather than a
 date**, which is what a star schema looks like. Without it the only way to get a
@@ -316,9 +331,61 @@ fresh for ever, and looked like it was working.
 **Check `min_absolute_drop` against the table's real size.** It defaults to
 1,000 rows, so on a 400-row table row-loss can never fire.
 
+**Set `load_weekdays` for anything that does not load daily.** A weekday-only
+feed read on a Sunday is legitimately two days behind; reporting that every
+weekend is how a detector earns a filter rule and stops being read.
+
 Two scans are needed before anything is announced (`confirmations`, default 2).
 A single sweep marks a probe suspect and says nothing — that is the
 suspect-then-confirm rule, not a fault.
+
+### Schema drift
+
+`watch_schema: true` adds a second query per sweep that lists visible columns
+and measures, and reports anything that **disappears**. Additions are ignored on
+purpose: models gain columns constantly, and a detector that fires on ordinary
+development gets switched off, taking the removal case with it.
+
+It uses DAX `INFO.VIEW` functions over the same read-only endpoint rather than
+XMLA. XMLA would need ADOMD or TOM, which in practice means a .NET dependency
+and a Windows host; the controller runs in a Linux container. A schema that
+cannot be read is a detector fault, never "every column was deleted".
+
+### Accepting a planned change
+
+When a change is intentional — a table renamed, a feed genuinely halved — accept
+it rather than waiting for the alert to be ignored:
+
+```powershell
+triage-demo health --accept sales-invoices
+triage-demo health --accept all
+```
+
+This clears the suspicion, not the data: the next sweep records what it finds and
+compares from there. Without it, the only alternatives are to let a standing
+finding train people to skim past the output, or to reset the whole store and
+lose every other baseline with it.
+
+### When a probe keeps failing
+
+After `max_consecutive_errors` faults (default 5) a probe is **parked** for
+`circuit_cooldown_minutes` (default 60) and reports that it stopped. Time
+reopens it, so a fixed permission is picked up without a redeploy, and one
+successful reading clears it immediately.
+
+This exists because it was needed: a probe pointed at a Direct Lake model, which
+app-only callers cannot query at all, reached twelve consecutive 401s — pure load
+on the capacity being watched, and a fault line in every sweep.
+
+### Cost of watching
+
+Probes run sequentially with `SILENT_PROBE_PACE_SECONDS` (default 1) between
+them. `executeQueries` is throttled per user across *all* datasets, so a
+detector that fires them concurrently becomes the capacity incident it exists to
+watch for. Only one sweep runs at a time across instances, arbitrated by a lease
+in the state table — two concurrent sweeps would each increment the same suspect
+count and confirm a finding on its first real occurrence, turning the
+false-positive guard into a source of them.
 
 ### Permissions, and the limit that will actually stop you
 

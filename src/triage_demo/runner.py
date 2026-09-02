@@ -13,6 +13,8 @@ store, and the dedup/persistence behaviour can be tested without a model.
 from __future__ import annotations
 
 import logging
+import os
+import socket
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -381,10 +383,27 @@ class TriageRunner:
             logger.info("Silent sweep is disabled in configuration; skipping %d probe(s)", len(probes))
             return []
 
-        scanner = SilentFailureScanner(
-            self.build_health_client(), self.semantic_health, now=now
-        )
-        findings = await scanner.sweep(probes)
+        # One sweep at a time across every instance. A schedule can wake more
+        # than one container, and two sweeps running together would each
+        # increment the same probe's suspect count -- confirming a finding on
+        # its first real occurrence and turning the rule that prevents false
+        # positives into a source of them.
+        owner = f"{socket.gethostname()}-{os.getpid()}"
+        lease_ttl = max(60, self.settings.triage_timeout_seconds)
+        if not self.semantic_health.try_acquire_lease("silent-sweep", owner, lease_ttl):
+            logger.info("Another instance holds the sweep lease; skipping this run")
+            return []
+
+        try:
+            scanner = SilentFailureScanner(
+                self.build_health_client(),
+                self.semantic_health,
+                now=now,
+                pace_seconds=self.settings.silent_probe_pace_seconds,
+            )
+            findings = await scanner.sweep(probes)
+        finally:
+            self.semantic_health.release_lease("silent-sweep", owner)
 
         lines: list[str] = []
         for finding in findings:

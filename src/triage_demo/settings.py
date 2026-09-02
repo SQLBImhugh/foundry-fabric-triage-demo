@@ -101,6 +101,10 @@ class Settings(BaseSettings):
     #: parsing happens in ``load_probes`` where a bad value disables only the
     #: detector.
     silent_health_probes: str = ""
+    #: Seconds between probes within one sweep. ``executeQueries`` is throttled
+    #: per user across all datasets, so a detector that fires them back to back
+    #: becomes load on the capacity it is watching.
+    silent_probe_pace_seconds: float = 1.0
     # The URL behind the card's Approve/Decline buttons. An incoming webhook
     # has no bot behind it, so Action.Submit does nothing; the buttons have to
     # be links to something that records the decision. Empty means the card

@@ -29,12 +29,14 @@ nothing, and only a condition that survives confirmation becomes a finding.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+from triage_demo.observability import tool_span
 from triage_demo.store.semantic_health import ProbeState, SemanticHealthStore
 from triage_demo.tools.semantic_health import ProbeResult, SemanticModelHealthClient
 
@@ -45,7 +47,18 @@ logger = logging.getLogger("triage.detectors.silent")
 DEFAULT_MAX_DROP_FRACTION = 0.30
 DEFAULT_MIN_ABSOLUTE_DROP = 1_000
 
-#: Scans that must agree before anything is announced.
+#: Consecutive detector faults before a probe is parked. Observed need: a probe
+#: against a Direct Lake model reached twelve consecutive 401s, re-querying a
+#: model it was never going to be allowed to read, on every sweep. A detector
+#: that cannot see should say so once and stop, not generate load and noise for
+#: ever.
+DEFAULT_MAX_CONSECUTIVE_ERRORS = 5
+
+#: How long a parked probe waits before trying again. Long enough that a broken
+#: permission is fixed by a person rather than rediscovered every minute; short
+#: enough that the fix is picked up without a redeploy.
+DEFAULT_CIRCUIT_COOLDOWN_MINUTES = 60
+
 DEFAULT_CONFIRMATIONS = 2
 
 #: How long after the expected refresh before staleness is even considered.
@@ -72,6 +85,10 @@ class HealthProbe:
     #: date *key* rather than a date -- which is what a star schema looks like.
     #: Leave empty when the date lives on the measured table itself.
     date_table: str = ""
+    #: Watch for columns and measures disappearing. Opt-in because it costs a
+    #: second query per sweep, and because a model nobody reports on does not
+    #: need it.
+    watch_schema: bool = False
     row_count_table: str = ""
     control_measures: tuple[str, ...] = ()
     #: How far behind "now" the data is expected to be, in hours. A daily model
@@ -81,6 +98,14 @@ class HealthProbe:
     max_drop_fraction: float = DEFAULT_MAX_DROP_FRACTION
     min_absolute_drop: int = DEFAULT_MIN_ABSOLUTE_DROP
     confirmations: int = DEFAULT_CONFIRMATIONS
+    #: Bounds on a probe that cannot see, rather than on the data.
+    max_consecutive_errors: int = DEFAULT_MAX_CONSECUTIVE_ERRORS
+    circuit_cooldown_minutes: int = DEFAULT_CIRCUIT_COOLDOWN_MINUTES
+    #: Weekdays this model is expected to load, as ISO numbers (Monday=1).
+    #: Empty means every day. A model fed by a weekday-only source is not stale
+    #: on a Sunday, and reporting it as such every weekend is how a detector
+    #: earns a filter rule in somebody's inbox.
+    load_weekdays: tuple[int, ...] = ()
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> HealthProbe:
@@ -92,6 +117,7 @@ class HealthProbe:
             report_name=str(raw.get("report_name", "")),
             date_column=str(raw.get("date_column", "")),
             date_table=str(raw.get("date_table", "")),
+            watch_schema=bool(raw.get("watch_schema", False)),
             row_count_table=str(raw.get("row_count_table", "")),
             control_measures=tuple(raw.get("control_measures") or ()),
             expected_lag_hours=int(raw.get("expected_lag_hours", 24)),
@@ -99,6 +125,13 @@ class HealthProbe:
             max_drop_fraction=float(raw.get("max_drop_fraction", DEFAULT_MAX_DROP_FRACTION)),
             min_absolute_drop=int(raw.get("min_absolute_drop", DEFAULT_MIN_ABSOLUTE_DROP)),
             confirmations=int(raw.get("confirmations", DEFAULT_CONFIRMATIONS)),
+            max_consecutive_errors=int(
+                raw.get("max_consecutive_errors", DEFAULT_MAX_CONSECUTIVE_ERRORS)
+            ),
+            circuit_cooldown_minutes=int(
+                raw.get("circuit_cooldown_minutes", DEFAULT_CIRCUIT_COOLDOWN_MINUTES)
+            ),
+            load_weekdays=tuple(int(d) for d in (raw.get("load_weekdays") or ())),
         )
 
 
@@ -140,6 +173,36 @@ def _parse_date(value: str) -> datetime | None:
     return None
 
 
+def _parse_timestamp(value: str) -> datetime | None:
+    """Read an ISO timestamp written by this module, tolerating a missing one."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _expected_loads_between(
+    watermark: date, today: date, weekdays: tuple[int, ...]
+) -> int:
+    """How many expected load days have passed since the data last moved.
+
+    Counts the days *after* the watermark up to and including today, so a model
+    that loaded on its most recent expected day scores zero and is not stale.
+    """
+    allowed = set(weekdays)
+    days = (today - watermark).days
+    if days <= 0:
+        return 0
+    return sum(
+        1
+        for offset in range(1, days + 1)
+        if (watermark + timedelta(days=offset)).isoweekday() in allowed
+    )
+
+
 class SilentFailureScanner:
     """Compares a semantic model against its own history.
 
@@ -154,16 +217,36 @@ class SilentFailureScanner:
         store: SemanticHealthStore,
         *,
         now: datetime | None = None,
+        pace_seconds: float = 0.0,
     ) -> None:
         self._client = client
         self._store = store
         self._now = now
+        self._pace_seconds = pace_seconds
 
     def _clock(self) -> datetime:
         return self._now or datetime.now(UTC)
 
     async def scan(self, probe: HealthProbe) -> HealthFinding:
         """Take one reading and decide what it means."""
+        with tool_span(
+            "semantic_health_probe",
+            probe_name=probe.name,
+            workspace_id=probe.workspace_id,
+            dataset_id=probe.dataset_id,
+            watch_schema=probe.watch_schema,
+        ) as span:
+            finding = await self._scan(probe)
+            # Metadata only, and deliberately no observed values: a watermark
+            # or a row count is customer data, and traces are retained and
+            # widely readable inside a tenant. Status and kind are enough to
+            # see the detector working without publishing what it saw.
+            span.set("probe.status", finding.status)
+            span.set("probe.kind", finding.kind or "none")
+            span.set("probe.suspect_count", finding.suspect_count)
+            return finding
+
+    async def _scan(self, probe: HealthProbe) -> HealthFinding:
         state = self._store.get(
             probe.workspace_id, probe.dataset_id, probe.name
         ) or ProbeState(
@@ -172,6 +255,10 @@ class SilentFailureScanner:
             probe_name=probe.name,
             report_name=probe.report_name,
         )
+
+        parked = self._circuit_open(probe, state)
+        if parked is not None:
+            return parked
 
         try:
             result = await self._client.run_probe(
@@ -193,9 +280,15 @@ class SilentFailureScanner:
 
         state.consecutive_errors = 0
         state.last_error = ""
+        # A reading that worked clears the breaker, so a fixed permission does
+        # not leave the probe parked until its cooldown happens to elapse.
+        state.circuit_opened_at = ""
         state.observations += 1
 
         kind, detail = self._judge(probe, state, result)
+
+        if kind == "":
+            kind, detail = await self._check_schema(probe, state)
 
         if kind == "":
             return self._record_healthy(probe, state, result)
@@ -245,6 +338,17 @@ class SilentFailureScanner:
         if observed.date() >= deadline:
             return ""
 
+        if probe.load_weekdays:
+            # Only count days the model was expected to load. A weekday-only
+            # feed read on a Monday is legitimately three days behind, and a
+            # detector that calls that stale fires every weekend until somebody
+            # mutes it -- taking the real findings with it.
+            expected = _expected_loads_between(
+                observed.date(), self._clock().date(), probe.load_weekdays
+            )
+            if expected == 0:
+                return ""
+
         behind = self._clock().date() - observed.date()
         return (
             f"The refresh reported success, but the newest data is {result.max_date} "
@@ -277,6 +381,117 @@ class SilentFailureScanner:
             f"The refresh reported success, but {probe.table} holds {current:,} rows "
             f"against a baseline of {baseline:,} -- a drop of {dropped:,} "
             f"({dropped / baseline:.0%})."
+        )
+
+    async def _check_schema(
+        self, probe: HealthProbe, state: ProbeState
+    ) -> tuple[str, str]:
+        """Report things that vanished, not things that appeared.
+
+        Checked after the data questions because a stale or collapsed model is
+        the more urgent report, and because a removed column often explains a
+        collapse that has already been raised.
+
+        **Only removals count.** Models gain columns and measures constantly;
+        treating that as drift would make the detector fire on ordinary
+        development and get it switched off within a week. A column that
+        disappears is different: every report and measure built on it is now
+        broken or silently wrong, and nothing in Power BI announces it.
+
+        A schema that cannot be read is a detector fault, never "everything was
+        deleted".
+        """
+        if not probe.watch_schema:
+            return "", ""
+
+        reader = getattr(self._client, "read_schema", None)
+        if reader is None:
+            return "", ""
+
+        try:
+            reading = await reader(probe.workspace_id, probe.dataset_id)
+        except Exception as exc:  # noqa: BLE001 - an unreadable schema is not a data finding
+            logger.warning("Schema probe for %s raised %s", probe.name, type(exc).__name__)
+            return "", ""
+
+        if not reading.ok:
+            logger.warning("Schema probe for %s could not run: %s", probe.name, reading.error[:200])
+            return "", ""
+
+        current = tuple(reading.entries)
+        previous = tuple(state.last_schema)
+
+        if not previous:
+            # First sighting establishes the shape. A baseline is not a finding.
+            state.last_schema = list(current)
+            return "", ""
+
+        missing = [e for e in previous if e not in current]
+        if not missing:
+            # Additions are normal evolution; keep the baseline current so a
+            # later removal is measured against what is really there now.
+            state.last_schema = list(current)
+            return "", ""
+
+        shown = ", ".join(m.split(":", 1)[-1] for m in missing[:5])
+        more = f" and {len(missing) - 5} more" if len(missing) > 5 else ""
+        return "schema_drift", (
+            f"The refresh reported success, but {len(missing)} object(s) the model "
+            f"used to expose are gone: {shown}{more}. Reports and measures built on "
+            f"them are broken or silently wrong."
+        )
+
+    def _circuit_open(
+        self, probe: HealthProbe, state: ProbeState
+    ) -> HealthFinding | None:
+        """Park a probe that keeps failing, and say so once.
+
+        Returns a finding when the probe should be skipped, ``None`` to proceed.
+
+        Without this, a probe that can never succeed re-queries on every sweep
+        for ever. That is not hypothetical: a probe pointed at a Direct Lake
+        model, which app-only callers are not permitted to query at all,
+        reached twelve consecutive 401s. Retrying was pure cost -- load on the
+        capacity being watched, and a fault line in every sweep that trains
+        people to skim past the output.
+
+        Reopened by time rather than by anyone remembering, so a fixed
+        permission is picked up without a redeploy.
+        """
+        if state.consecutive_errors < probe.max_consecutive_errors:
+            return None
+
+        opened = _parse_timestamp(state.circuit_opened_at)
+        if opened is None:
+            state.circuit_opened_at = self._clock().isoformat(timespec="seconds")
+            self._store.put(state)
+            opened = self._clock()
+
+        due = opened + timedelta(minutes=probe.circuit_cooldown_minutes)
+        if self._clock() >= due:
+            # Half-open: allow exactly one attempt. A success clears the count
+            # and the timestamp; another failure re-arms the cooldown.
+            state.circuit_opened_at = ""
+            self._store.put(state)
+            logger.info("Probe %s retrying after cooldown", probe.name)
+            return None
+
+        logger.info(
+            "Probe %s parked after %d consecutive faults; next attempt %s",
+            probe.name, state.consecutive_errors, due.isoformat(timespec="minutes"),
+        )
+        return HealthFinding(
+            probe=probe.name,
+            status="parked",
+            kind="detector_fault",
+            detail=(
+                f"Parked after {state.consecutive_errors} consecutive failures. "
+                f"Last error: {state.last_error[:200]} "
+                f"Next attempt after {due.isoformat(timespec='minutes')}."
+            ),
+            report_name=probe.report_name,
+            workspace_id=probe.workspace_id,
+            dataset_id=probe.dataset_id,
         )
 
     # --- outcomes ----------------------------------------------------------
@@ -379,7 +594,20 @@ class SilentFailureScanner:
         )
 
     async def sweep(self, probes: list[HealthProbe]) -> list[HealthFinding]:
-        return [await self.scan(probe) for probe in probes]
+        """Probe every configured model, paced so the detector stays small.
+
+        Sequential on purpose. The obvious improvement is to run probes
+        concurrently, and it is the wrong one: ``executeQueries`` is throttled
+        per user across *all* datasets, and a detector that trips that limit
+        becomes the capacity incident it was watching for. Sequential with a
+        pause keeps the cost of watching proportional to the thing watched.
+        """
+        findings: list[HealthFinding] = []
+        for index, probe in enumerate(probes):
+            if index and self._pace_seconds:
+                await asyncio.sleep(self._pace_seconds)
+            findings.append(await self.scan(probe))
+        return findings
 
 
 def load_probes(raw: Any) -> list[HealthProbe]:

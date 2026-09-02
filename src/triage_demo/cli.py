@@ -20,11 +20,13 @@ from pathlib import Path
 from typing import Any
 
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.syntax import Syntax
 from rich.table import Table
 
+from triage_demo.detectors.silent_failures import load_probes
 from triage_demo.observability import configure_telemetry
 from triage_demo.runner import (
     RunArtifacts,
@@ -962,6 +964,134 @@ def cmd_health(args: argparse.Namespace) -> int:
         console.print(table)
         return 0
 
+    if args.probes:
+        probes = load_probes(settings.silent_health_probes)
+        if not probes:
+            console.print(
+                "[dim]No probes configured.[/dim] "
+                "[dim]Set SILENT_HEALTH_PROBES; see docs/provisioning.md.[/dim]"
+            )
+            return 0
+        table = Table(title="Configured probes")
+        table.add_column("Probe")
+        table.add_column("Report")
+        table.add_column("Measures")
+        table.add_column("Watermark")
+        table.add_column("Lag")
+        table.add_column("Schema")
+        table.add_column("Loads")
+        for probe in probes:
+            # Rich reads square brackets as markup, so a DAX-style
+            # ``table[column]`` silently loses the column name -- the one part
+            # of this row somebody is checking.
+            watermark = escape(
+                f"{probe.date_table}[{probe.date_column}]"
+                if probe.date_table
+                else (probe.date_column or "-")
+            )
+            days = (
+                ",".join(str(d) for d in probe.load_weekdays)
+                if probe.load_weekdays
+                else "every day"
+            )
+            table.add_row(
+                probe.name,
+                probe.report_name or "-",
+                probe.table,
+                watermark,
+                f"{probe.expected_lag_hours}h",
+                "yes" if probe.watch_schema else "no",
+                days,
+            )
+        console.print(table)
+        return 0
+
+    if args.accept:
+        # A planned change -- a table renamed, a feed genuinely halved -- must be
+        # accepted deliberately. Without this the only ways to clear a standing
+        # finding are to wait for the model to look wrong long enough that
+        # nobody reads the alert, or to reset the whole store and lose every
+        # other baseline with it.
+        states = [
+            s for s in runner.semantic_health.all_states()
+            if args.accept in ("all", s.probe_name)
+        ]
+        if not states:
+            console.print(f"[yellow]No baseline named {args.accept!r}.[/yellow]")
+            return 1
+        for state in states:
+            state.suspect_count = 0
+            state.first_suspect_at = ""
+            state.suspect_kind = ""
+            state.last_schema = []
+            runner.semantic_health.put(state)
+            console.print(
+                f"[green]Accepted[/green] {state.probe_name}: the next reading becomes "
+                "the baseline."
+            )
+        console.print(
+            "[dim]Cleared the suspicion, not the data. The next sweep records what it "
+            "finds and compares from there.[/dim]"
+        )
+        return 0
+
+    if args.preflight:
+        probes = load_probes(settings.silent_health_probes)
+        if not probes:
+            console.print("[yellow]No probes configured — the detector watches nothing.[/yellow]")
+            return 1
+
+        problems: list[tuple[str, str, str]] = []
+        seen: dict[tuple[str, str, str], str] = {}
+        for probe in probes:
+            key = (probe.workspace_id, probe.dataset_id, probe.name)
+            if key in seen:
+                # State is keyed on exactly this triple, so a duplicate does not
+                # give a second opinion -- the two probes overwrite each other's
+                # baseline and neither ever accumulates history.
+                problems.append((probe.name, "error", "duplicate probe name for the same model"))
+            seen[key] = probe.name
+
+            if not probe.workspace_id or not probe.dataset_id:
+                problems.append((probe.name, "error", "missing workspace or dataset id"))
+            if not probe.table:
+                problems.append((probe.name, "error", "no table to measure"))
+            if probe.date_table and not probe.date_column:
+                problems.append((probe.name, "error", "date_table without date_column"))
+            if not probe.date_column:
+                problems.append(
+                    (probe.name, "warn", "no date column, so staleness is not watched")
+                )
+            if probe.confirmations < 1:
+                problems.append(
+                    (probe.name, "error", "confirmations below 1 would announce on one reading")
+                )
+            if probe.expected_lag_hours <= 0:
+                problems.append((probe.name, "error", "expected_lag_hours must be positive"))
+            if probe.min_absolute_drop <= 0:
+                problems.append(
+                    (probe.name, "warn", "min_absolute_drop of 0 will alert on any shrinkage")
+                )
+
+        table = Table(title="Probe preflight")
+        table.add_column("Probe")
+        table.add_column("Severity")
+        table.add_column("Finding")
+        for name, severity, detail in problems:
+            colour = "red" if severity == "error" else "yellow"
+            table.add_row(name, f"[{colour}]{severity}[/{colour}]", detail)
+        if problems:
+            console.print(table)
+        else:
+            console.print(
+                f"[green]{len(probes)} probe(s) look sane.[/green] "
+                "[dim]Configuration only; run a sweep to prove reachability.[/dim]"
+            )
+
+        # A configuration that cannot detect anything is the failure mode that
+        # matters here: it looks like monitoring and reports nothing, for ever.
+        return 1 if any(sev == "error" for _, sev, _ in problems) else 0
+
     lines = asyncio.run(runner.silent_sweep())
     if not lines:
         console.print(
@@ -1083,6 +1213,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     health.add_argument(
         "--baselines", action="store_true", help="Show what healthy looked like last time"
+    )
+    health.add_argument(
+        "--probes", action="store_true", help="Show what is being watched, and how"
+    )
+    health.add_argument(
+        "--accept", metavar="PROBE",
+        help="Accept the current state as the new normal after a planned change "
+             "('all' for every probe)",
+    )
+    health.add_argument(
+        "--preflight", action="store_true",
+        help="Check probe configuration for mistakes that would silently detect nothing",
     )
     health.set_defaults(func=cmd_health)
 
