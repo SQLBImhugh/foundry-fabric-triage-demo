@@ -525,13 +525,25 @@ def cmd_watch(args: argparse.Namespace) -> int:
     else:
         console.print("[yellow]Mock inbox[/yellow] [dim](set TRIAGE_TOOL_MODE=live for Graph)[/dim]\n")
 
+    if settings.graph_ingestion_mode == "subscription":
+        # Refused rather than quietly polling. Believing you have push
+        # notifications while actually getting a 30-second poll is a latency
+        # assumption nothing in the system will ever correct.
+        console.print(
+            "[red]GRAPH_INGESTION_MODE=subscription is not implemented.[/red]\n"
+            "[dim]Graph change notifications need a public HTTPS validation endpoint and "
+            "renewal before expiry (mail caps at 4230 minutes). Set it back to 'poll', or "
+            "drive the agent from your own webhook receiver.[/dim]"
+        )
+        return 2
+
     return asyncio.run(
         _watch_loop(
             runner,
             inbox,
             once=args.once,
             limit=args.limit,
-            interval=args.interval,
+            interval=args.interval if args.interval is not None else settings.graph_poll_seconds,
             live=live,
         )
     )
@@ -1163,7 +1175,11 @@ def build_parser() -> argparse.ArgumentParser:
     watch = sub.add_parser("watch", help="Poll a mailbox and triage each new message")
     watch.add_argument("--once", action="store_true", help="Drain once and exit")
     watch.add_argument("--limit", type=int, default=10, help="Max messages per poll")
-    watch.add_argument("--interval", type=int, default=30, help="Seconds between polls")
+    watch.add_argument(
+        "--interval", type=int, default=None,
+        help="Seconds between polls (default: GRAPH_POLL_SECONDS, currently "
+             f"{settings.graph_poll_seconds})",
+    )
     watch.add_argument("--verbose", "-v", action="store_true", help="Show agent reasoning")
     watch.add_argument(
         "--no-require-scope-check",

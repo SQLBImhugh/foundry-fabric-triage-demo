@@ -51,7 +51,13 @@ class Settings(BaseSettings):
     graph_client_id: str = ""
     graph_client_secret: str = Field(default="", repr=False)
     graph_mailbox: str = "bi-alerts@contoso.com"
+    #: How mail arrives. Only ``poll`` is implemented; ``subscription`` is
+    #: rejected at startup rather than silently falling back, because an
+    #: operator who believes they have push notifications and is actually
+    #: getting a 30-second poll has a latency assumption nothing will correct.
     graph_ingestion_mode: Literal["poll", "subscription"] = "poll"
+    #: Default seconds between polls for ``triage-demo watch``. Overridable per
+    #: run with ``--interval``.
     graph_poll_seconds: int = 30
     # A mailbox the agent must NOT be able to read. `watch` probes it at startup
     # and refuses to run if the read succeeds, because that means the app
@@ -112,10 +118,6 @@ class Settings(BaseSettings):
     approval_callback_url: str = ""
     # How long a gated action waits for an answer before failing closed.
     approval_timeout_seconds: int = 300
-    # Set once an Exchange ApplicationAccessPolicy scopes the app registration
-    # to `graph_mailbox`. Preflight warns loudly while this is False, because an
-    # unscoped app-only Mail.Read grant can read EVERY mailbox in the tenant.
-    graph_mailbox_scoped: bool = False
 
     # --- Power BI ----------------------------------------------------------
     powerbi_tenant_id: str = ""
@@ -126,6 +128,9 @@ class Settings(BaseSettings):
 
     # --- Teams -------------------------------------------------------------
     teams_webhook_url: str = Field(default="", repr=False)
+    #: Only ``webhook`` works. Graph app-only channel posting is restricted by
+    #: Microsoft to migration scenarios, so an unattended agent cannot post as
+    #: itself; ``graph`` is rejected rather than silently falling back.
     teams_mode: Literal["webhook", "graph"] = "webhook"
 
     # --- Observability -----------------------------------------------------

@@ -648,6 +648,16 @@ class TriageRunner:
         was sent" impossible to answer.
         """
         if self._teams is None:
+            if self.settings.teams_mode != "webhook":
+                # Rejected rather than quietly using the webhook. Graph app-only
+                # channel posting is restricted to migration scenarios, so this
+                # mode cannot work -- and an operator who thinks the agent posts
+                # as itself has the wrong mental model of who is talking.
+                raise ValueError(
+                    f"TEAMS_MODE={self.settings.teams_mode!r} is not supported. Graph "
+                    "app-only channel posting is restricted by Microsoft to migration "
+                    "scenarios; use 'webhook' with a Power Automate Workflows URL."
+                )
             if self.settings.triage_tool_mode == "live" and self.settings.teams_webhook_url:
                 self._teams = WorkflowsWebhookTeamsNotifier(self.settings.teams_webhook_url)
             else:

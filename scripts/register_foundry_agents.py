@@ -287,7 +287,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="Also create/update the RAI guardrail policy")
     parser.add_argument("--account", default=os.environ.get("FOUNDRY_ACCOUNT_NAME", ""))
     parser.add_argument("--resource-group", default=os.environ.get("AZURE_RESOURCE_GROUP", ""))
-    parser.add_argument("--guardrail-name", default="bi-triage-guardrail")
+    parser.add_argument("--guardrail-name", default=_settings.foundry_guardrail_name)
     args = parser.parse_args(argv)
 
     definitions = build_definitions(args.model)

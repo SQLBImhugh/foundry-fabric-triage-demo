@@ -322,3 +322,38 @@ def test_the_broken_routine_ships_disabled() -> None:
         "and update the evidence in azure.yaml and docs/hosted-architecture.md "
         "before enabling it."
     )
+
+
+def test_every_setting_is_actually_read_somewhere() -> None:
+    """A configuration knob nothing consumes is a promise nothing keeps.
+
+    Two shipped this way. `GRAPH_INGESTION_MODE` offered poll or subscription
+    and was read by nothing, so setting it to subscription silently kept
+    polling. `GRAPH_POLL_SECONDS` was documented as the poll interval while the
+    watch loop used its own hardcoded default, so changing it did nothing at
+    all. Both were advertised in `.env.example`.
+
+    That is worse than a missing feature: the operator makes a decision, the
+    system ignores it, and nothing reports the disagreement.
+    """
+    import sys
+
+    sys.path.insert(0, str(REPO_ROOT / "src"))
+    from triage_demo.settings import Settings
+
+    # scripts/ counts: register_foundry_agents.py legitimately consumes several
+    # settings that no runtime module touches.
+    sources = [
+        f.read_text(encoding="utf-8", errors="ignore")
+        for root in ("src", "scripts", "demo/scripts")
+        for f in (REPO_ROOT / root).rglob("*.py")
+        if f.name != "settings.py"
+    ]
+    blob = "\n".join(sources)
+
+    unread = [name for name in Settings.model_fields if name not in blob]
+    assert not unread, (
+        f"settings nothing reads: {sorted(unread)}. Either consume them or remove "
+        "them -- an operator who sets one and sees no effect has no way to tell "
+        "the difference between a broken feature and a misunderstood one."
+    )
