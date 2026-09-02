@@ -310,7 +310,7 @@ Offer: this repo, the agent definitions, the prompts, the tool schemas, the
 | Deferred retries vanish between runs | The retry store degraded to in-memory. The container logs an error at startup when that happens |
 | No Teams card for a recurring alert | Expected: an incident is announced once. Check `notified_count` in the incident record. `triage-demo reset` to announce again |
 | The Teams channel fills with identical cards | The routine is running against mail that keeps being re-ingested. `azd ai routine disable bi-triage-schedule`, then check the processed-mail log is durable — the container logs an error at startup if it degraded to in-memory |
-| The routine is enabled again after a deploy | `azd deploy` re-upserts it from `azure.yaml`, where `enabled: true`. Disable it *after* deploying, not before |
+| The routine is enabled again after a deploy | Deploy does not manage routine state; run `azd ai routine disable bi-triage-schedule` and confirm with `show`, not before |
 | Incident queue looks empty in section 6 | A later `run` cleared it. Re-run scenario 3, then use `--keep-incidents` on anything after it |
 | Agent behaves oddly in Foundry mode | Almost certainly a stale registration. `register_foundry_agents.py --dry-run` |
 | Everything is on fire | Both modes to `mock`. Every scenario still runs, offline, in seconds |

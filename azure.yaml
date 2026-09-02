@@ -101,8 +101,8 @@ services:
             - name: APPROVAL_CALLBACK_URL
               value: ${APPROVAL_CALLBACK_URL}
             # The silent-failure detector. Off switch lives here rather than
-            # in routine state, because a deploy re-enables a disabled
-            # routine from this same file.
+            # in routine state, because routine state is not reliably
+            # managed from this file -- see docs/operations.md.
             - name: SILENT_SWEEP_ENABLED
               value: "true"
             # Empty by default. A detector told nothing watches nothing,
@@ -136,9 +136,29 @@ services:
         protocols:
             - protocol: responses
               version: 2.0.0
-    # The trigger that removes the laptop from the loop entirely. Nobody runs a
-    # command for this to happen: the routine wakes the controller on a
-    # schedule, it drains the alerts mailbox and triages whatever is new.
+    # The trigger that would remove the laptop from the loop. It does not
+    # work today, so it ships disabled.
+    #
+    # Verified 2026-09-02, six days after registering it: `azd ai routine
+    # show` reports it enabled with this cron, `azd ai routine list` returns
+    # {"value": null}, `azd ai routine run list` reports no runs, and a manual
+    # dispatch returns three ids while the container does nothing. Application
+    # Insights showed activity in two of twenty-four hours -- both of them
+    # hours when a person invoked the agent by hand.
+    #
+    # It is declared rather than deleted because the shape is right and costs
+    # nothing while disabled: when the preview defect is fixed, this becomes a
+    # one-line change instead of a rediscovery. It is disabled rather than
+    # left enabled because an accelerator whose whole subject is failures that
+    # never announce themselves must not ship a scheduler that silently does
+    # nothing -- an adopter would deploy, read `enabled: true`, and never learn
+    # that their triage agent has not run since the day they installed it.
+    #
+    # Test it in your own tenant before turning it on; this may be regional or
+    # may already be fixed. Until then drive the agent from a scheduler you
+    # already trust -- see docs/operations.md. Nothing needs rewriting either
+    # way, because the scheduled path and the interactive path are the same
+    # code.
     #
     # Empty input is deliberate and load-bearing -- the controller treats a
     # short payload as "no specific alert, go and look", which is exactly what a
@@ -149,7 +169,7 @@ services:
         uses:
             - bi-triage-controller
         description: Drain the BI alerts mailbox and triage anything new
-        enabled: true
+        enabled: false
         triggers:
             default:
                 type: schedule

@@ -290,3 +290,35 @@ def test_both_agent_contracts_carry_the_same_safety_invariants(
         if needle not in text
     ]
     assert not missing, f"{missing} do not state the {name!r} invariant ({phrase!r})"
+
+
+def test_the_broken_routine_ships_disabled() -> None:
+    """A scheduler that silently does nothing must not ship enabled.
+
+    Foundry routines are in preview and this one does not fire: verified six
+    days after registration by three independent checks, most decisively that
+    telemetry showed activity in two of twenty-four hours, both of them hours
+    when a person invoked the agent by hand.
+
+    Left enabled, an adopter deploys, reads `enabled: true`, and never learns
+    that their triage agent has not run since the day they installed it. That is
+    the exact class of failure this accelerator exists to detect, so shipping it
+    would be self-contradicting.
+
+    The declaration stays because the shape is right and costs nothing while
+    disabled. If you have verified it fires in your tenant, enable it there --
+    but flipping this file back to `true` without that evidence is what this
+    test is here to stop.
+    """
+    routine = re.search(
+        r"bi-triage-schedule:.*?\n(\s+)enabled:\s*(\w+)",
+        (REPO_ROOT / "azure.yaml").read_text(encoding="utf-8"),
+        re.S,
+    )
+    assert routine is not None, "the routine declaration went missing"
+    assert routine.group(2) == "false", (
+        "bi-triage-schedule is enabled, but Foundry routines were last verified "
+        "not to fire. Re-verify with `azd ai routine run list bi-triage-schedule` "
+        "and update the evidence in azure.yaml and docs/hosted-architecture.md "
+        "before enabling it."
+    )

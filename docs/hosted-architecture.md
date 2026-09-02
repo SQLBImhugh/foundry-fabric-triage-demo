@@ -8,7 +8,7 @@ observed, it says so.
 ## The shape
 
 ```
-Foundry routine  (bi-triage-schedule, cron)   <- registered, enabled, DOES NOT FIRE
+Foundry routine  (bi-triage-schedule, cron)   <- declared, SHIPS DISABLED, does not fire
         |                                        (preview defect; see below)
         v
 Hosted agent: bi-triage-controller          <- container, Python, its own agent identity
@@ -193,7 +193,7 @@ explicit sentinel, and only the most recent inbound message is read.
   the agent by hand. A five-minute cron would appear in all twenty-four.
 
   ```powershell
-  azd ai routine show bi-triage-schedule      # enabled: true, cron */5 * * * *
+  azd ai routine show bi-triage-schedule      # cron */5 * * * *; reported enabled while it was
   azd ai routine list                         # {"value": null}
   azd ai routine run list bi-triage-schedule  # no runs
   ```

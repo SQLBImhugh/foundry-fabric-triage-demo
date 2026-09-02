@@ -835,7 +835,7 @@ footer a { color: var(--text-dim); }
       </tr>
       <tr>
         <td>Being woken</td>
-        <td>A Foundry routine on a cron schedule. The same container also answers interactively in
+        <td>A Foundry routine on a cron schedule &mdash; declared, but disabled because it does not fire; drive it from your own scheduler. The same container also answers interactively in
         the Playground, running identical code — a demo path that differs from the production path
         eventually demonstrates something that does not exist.</td>
       </tr>
@@ -1434,9 +1434,9 @@ footer a { color: var(--text-dim); }
           <td>A Foundry routine is declared in <code>azure.yaml</code> with a five-minute cron,
               and the platform reports it <code>enabled</code> — but it has never invoked the
               agent. Re-verified six days after registration. Preview defect, not
-              misconfiguration; drive the agent from a scheduler you already trust. Note that
-              <code>azd deploy</code> re-upserts routines and will quietly switch a disabled one
-              back on, so disable <em>after</em> deploying.</td></tr>
+              misconfiguration; drive the agent from a scheduler you already trust. Routine enabled-state is not
+              managed by <code>azd deploy</code> in either direction, so use
+              <code>azd ai routine disable</code> and check the result.</td></tr>
       <tr><td>Live mailbox ingestion</td><td class="yes">Connected</td>
           <td>The hosted controller reads a real mailbox with app-only Graph <code>Mail.Read</code>,
               scoped to that one mailbox by an Exchange policy. The runs above use fixed sample

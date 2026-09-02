@@ -246,6 +246,14 @@ Repository evidence says the current Foundry routine is registered and enabled b
 
 A deploy can re-enable a disabled routine. Therefore the disable switch for this detector must be in controller configuration, not routine state. Add a setting such as `SILENT_SWEEP_ENABLED=false` and have the hosted controller return a no-op result before any Power BI call when disabled.
 
+> **Later measurement, same conclusion.** On 2026-09-02 a deploy was found *not*
+> to change routine enabled-state in either direction — `enabled: false` in
+> `azure.yaml` did not disable an enabled routine, and a full rebuild did not
+> re-enable a disabled one. The premise above no longer reproduces, but the
+> recommendation stands and is if anything stronger: routine state is not
+> reliably driven from the deployment file, so the dependable switch is
+> controller configuration.
+
 Recommended cadence:
 
 - Default external poll every 15 minutes for the scanner itself.

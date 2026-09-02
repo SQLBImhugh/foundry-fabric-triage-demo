@@ -15,22 +15,53 @@ demo script see [`run-sheet.md`](../demo/run-sheet.md).
 | Approval reply | Applies or abandons a proposed Tier 2 action | Unset `APPROVAL_CALLBACK_URL` — with no gate configured, every gated action is refused |
 
 **Nothing above happens on a timer today.** The Foundry routine that should
-provide one is declared, reports `enabled`, accepts dispatches — and has never
-invoked the agent. Re-verified 2026-09-02, six days after registration, by three
-independent checks; see [`hosted-architecture.md`](hosted-architecture.md). Until
-it fires, call the agent's endpoint from a scheduler you already trust:
+provide one is declared in `azure.yaml` but **ships disabled**, because it does
+not fire: it reports `enabled`, accepts dispatches, and never invokes the agent.
+Verified 2026-09-02, six days after registration, by three independent checks;
+see [`hosted-architecture.md`](hosted-architecture.md). Re-test it in your own
+tenant before enabling it — this may be regional, or already fixed.
+
+Until then, call the agent's endpoint from a scheduler you already trust:
 
 ```powershell
 azd ai agent invoke bi-triage-controller "sweep"          # drain the mailbox
 azd ai agent invoke bi-triage-controller "silent sweep"   # scan for silent failures
 ```
 
-The agent is unchanged either way — the scheduled path and the interactive path
+Anything that can make an authenticated HTTPS call will do. The endpoint and the
+agent's own identity are in the azd environment:
+
+```powershell
+azd env get-values | Select-String AGENT_BI_TRIAGE_CONTROLLER_RESPONSES_ENDPOINT
+```
+
+Windows Task Scheduler, a cron job, a GitHub Actions schedule, an Azure
+Function timer or a Logic App recurrence are all fine. Prefer one that
+**reports its own failures** — a scheduler that stops silently reproduces the
+problem it was brought in to solve.
+
+The agent is unchanged either way: the scheduled path and the interactive path
 are the same code, so nothing needs rewriting when the platform catches up.
 
-**Disable routines after deploying, not before.** `azd deploy` re-upserts every
-routine declared in `azure.yaml` and will silently re-enable one you turned off
-in the portal. Deploy, then disable.
+**Check that it is actually running.** Nothing currently alerts on the agent
+having stopped, which is worth knowing given the above. The cheapest check is the
+incident store's newest timestamp:
+
+```powershell
+triage-demo incidents        # nothing new since yesterday on a busy mailbox is a signal
+```
+
+**Routine enabled-state is not managed by `azd deploy`.** Measured
+2026-09-02, both directions: deploying with `enabled: false` in `azure.yaml` left
+an enabled routine enabled, and a full rebuild left a disabled one disabled. An
+earlier version of this document said a deploy would silently re-enable a
+disabled routine; that was observed once and no longer reproduces. Use the
+explicit commands, and check afterwards rather than assuming:
+
+```powershell
+azd ai routine disable bi-triage-schedule
+azd ai routine show bi-triage-schedule     # confirm; the deploy will not do it for you
+```
 
 **The silent-sweep off switch is configuration, not routine state**, for the same
 reason. A deploy resets routine state; it does not reset an environment variable
