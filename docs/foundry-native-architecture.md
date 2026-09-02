@@ -248,7 +248,7 @@ regardless.
 
 | Component | Mechanism | Status |
 |---|---|---|
-| Trigger | **Routine** (`azd ai routine`) — schedule or custom event | Built; declared in `azure.yaml` |
+| Trigger | **Routine** (`azd ai routine`) — schedule or custom event | Declared and enabled, but never fires — see `hosted-architecture.md` |
 | Inbox read | **Graph `Mail.Read` (application)** — no user, no stored refresh token | **Verified live** |
 | Mailbox scoping | Exchange **`ApplicationAccessPolicy`** — restrict to one mailbox | **Required**, not yet applied |
 | Orchestrator | **Hosted agent** — controller loop, containerised | Built and deployed |

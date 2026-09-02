@@ -792,9 +792,11 @@ footer a { color: var(--text-dim); }
   <p class="note">
     <b>One caveat on the trigger, tested rather than assumed.</b> A Foundry <b>routine</b> is
     registered against this agent with a five-minute schedule, and the platform reports it as
-    <code>enabled</code> and accepts manual dispatches. It has never actually invoked the agent —
-    zero runs recorded over three days, and a dispatch returns an id while the container does
-    nothing. Routines are in preview and this looks like a preview defect rather than a
+    <code>enabled</code> and accepts manual dispatches. It has never actually invoked the agent.
+    Re-checked on 2 September, six days after it was registered: still zero runs, a dispatch
+    still returns an id while the container does nothing, and telemetry shows activity only in
+    the hours somebody invoked the agent by hand — a five-minute cron would appear in every
+    hour. Routines are in preview and this looks like a preview defect rather than a
     misconfiguration. Until it fires, anything needing a timer should call the agent's endpoint
     from a scheduler you already trust; the agent itself is unchanged either way, because the
     scheduled path and the interactive path are the same code.
@@ -1428,11 +1430,13 @@ footer a { color: var(--text-dim); }
   <table>
     <thead><tr><th>Item</th><th>Status</th><th>Why it matters</th></tr></thead>
     <tbody>
-      <tr><td>Routine trigger</td><td class="yes">Wired</td>
-          <td>A Foundry routine wakes the hosted controller on a schedule; it drains the alerts
-              mailbox and sweeps for silent failures with no laptop involved. Disable it
-              <em>after</em> deploying — <code>azd deploy</code> re-upserts routines and will
-              quietly switch a disabled one back on.</td></tr>
+      <tr><td>Routine trigger</td><td class="partial">Registered, never fires</td>
+          <td>A Foundry routine is declared in <code>azure.yaml</code> with a five-minute cron,
+              and the platform reports it <code>enabled</code> — but it has never invoked the
+              agent. Re-verified six days after registration. Preview defect, not
+              misconfiguration; drive the agent from a scheduler you already trust. Note that
+              <code>azd deploy</code> re-upserts routines and will quietly switch a disabled one
+              back on, so disable <em>after</em> deploying.</td></tr>
       <tr><td>Live mailbox ingestion</td><td class="yes">Connected</td>
           <td>The hosted controller reads a real mailbox with app-only Graph <code>Mail.Read</code>,
               scoped to that one mailbox by an Exchange policy. The runs above use fixed sample

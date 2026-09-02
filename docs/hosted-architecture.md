@@ -180,11 +180,23 @@ explicit sentinel, and only the most recent inbound message is read.
 - **`azd ai routine list` may report "No routines found"** for a routine that
   exists and dispatches successfully. That inconsistency turned out to be a
   symptom, not a cosmetic bug: **the routine never fires.** Registered with a
-  five-minute cron, `enabled: true`, dispatch returns ids — and zero runs over
-  three days, with no container activity after a dispatch. Treat scheduled
-  triggering as unavailable in preview and drive the agent from a scheduler you
-  already trust. Nothing else depends on it, because the scheduled and
-  interactive paths are the same code.
+  five-minute cron, `enabled: true`, dispatch returns ids — and zero runs, with
+  no container activity after a dispatch. Treat scheduled triggering as
+  unavailable in preview and drive the agent from a scheduler you already trust.
+  Nothing else depends on it, because the scheduled and interactive paths are
+  the same code.
+
+  Re-verified 2026-09-02, six days after registration, and unchanged. Three
+  independent checks agreed: `azd ai routine run list` reports no runs, a fresh
+  dispatch produced none, and Application Insights recorded activity in only two
+  of the previous twenty-four hours — both of them hours when somebody invoked
+  the agent by hand. A five-minute cron would appear in all twenty-four.
+
+  ```powershell
+  azd ai routine show bi-triage-schedule      # enabled: true, cron */5 * * * *
+  azd ai routine list                         # {"value": null}
+  azd ai routine run list bi-triage-schedule  # no runs
+  ```
 
 ## Reproducing it
 

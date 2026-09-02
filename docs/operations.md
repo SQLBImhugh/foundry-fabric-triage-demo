@@ -14,6 +14,20 @@ demo script see [`run-sheet.md`](../demo/run-sheet.md).
 | Scheduled sweep | Drains due retries, runs the silent-failure scan | `SILENT_SWEEP_ENABLED=false` |
 | Approval reply | Applies or abandons a proposed Tier 2 action | Unset `APPROVAL_CALLBACK_URL` — with no gate configured, every gated action is refused |
 
+**Nothing above happens on a timer today.** The Foundry routine that should
+provide one is declared, reports `enabled`, accepts dispatches — and has never
+invoked the agent. Re-verified 2026-09-02, six days after registration, by three
+independent checks; see [`hosted-architecture.md`](hosted-architecture.md). Until
+it fires, call the agent's endpoint from a scheduler you already trust:
+
+```powershell
+azd ai agent invoke bi-triage-controller "sweep"          # drain the mailbox
+azd ai agent invoke bi-triage-controller "silent sweep"   # scan for silent failures
+```
+
+The agent is unchanged either way — the scheduled path and the interactive path
+are the same code, so nothing needs rewriting when the platform catches up.
+
 **Disable routines after deploying, not before.** `azd deploy` re-upserts every
 routine declared in `azure.yaml` and will silently re-enable one you turned off
 in the portal. Deploy, then disable.
