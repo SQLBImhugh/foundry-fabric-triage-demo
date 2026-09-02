@@ -1049,3 +1049,23 @@ async def test_drift_under_a_stale_model_is_not_learned_as_normal() -> None:
     healthy_again = MockSemanticHealthClient(max_date=_yesterday(), schema=dropped)
     finding = await _scanner(healthy_again, store).scan(probe)
     assert finding.kind == "schema_drift"
+
+def test_a_finding_keeps_the_column_name_when_printed() -> None:
+    """Rich eats DAX brackets, and the column name is the whole message.
+
+    "an object the model used to expose is gone" is useless without saying
+    which one. The detail is escaped at the point it is printed.
+    """
+    from rich.console import Console
+    from rich.markup import escape as esc
+
+    detail = ("The refresh reported success, but 1 object(s) the model used to "
+              "expose are gone: fact_sales_invoice[source_system].")
+
+    eaten = Console(file=io.StringIO(), width=200, force_terminal=False)
+    eaten.print(detail)
+    assert "source_system" not in eaten.file.getvalue(), "precondition: Rich drops it"
+
+    kept = Console(file=io.StringIO(), width=200, force_terminal=False)
+    kept.print(esc(detail))
+    assert "fact_sales_invoice[source_system]" in kept.file.getvalue()

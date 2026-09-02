@@ -128,3 +128,44 @@ def test_no_dead_links_between_the_documents(name: str) -> None:
 
     other = next(page for page in PAGES if page != name)
     assert other in html, f"{name} should still tell the reader about {other}"
+
+def test_every_scenario_is_captured_for_the_walkthrough() -> None:
+    """The capture list must not silently omit a scenario.
+
+    This is the drift that actually happened: scenarios 7 and 8 were added, the
+    capture script kept its hardcoded list of seven, and re-running it
+    faithfully regenerated the old runs while skipping the new ones. The
+    customer-facing page went stale while every other document stayed current,
+    and nothing failed.
+    """
+    import sys
+
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    from capture_walkthrough import RUNS
+
+    on_disk = {p.stem for p in (REPO_ROOT / "scenarios").glob("*.yaml")}
+    captured = {name for name, _stem, _keep in RUNS}
+
+    missing = on_disk - captured
+    assert not missing, (
+        f"scenarios/ has {sorted(missing)} with no entry in capture_walkthrough.RUNS, "
+        "so the walkthrough would be regenerated without them"
+    )
+
+    unknown = captured - on_disk
+    assert not unknown, f"RUNS captures scenarios that do not exist: {sorted(unknown)}"
+
+
+def test_the_walkthrough_shows_every_captured_run() -> None:
+    """A capture nobody embedded is a capture nobody sees."""
+    import sys
+
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    from capture_walkthrough import RUNS
+
+    html = (REPO_ROOT / "walkthrough" / "WALKTHROUGH.html").read_text(
+        encoding="utf-8", errors="ignore"
+    )
+    missing = [stem for _name, stem, _keep in RUNS if f'shots/{stem}.svg' not in html]
+
+    assert not missing, f"captured but never shown in the walkthrough: {missing}"

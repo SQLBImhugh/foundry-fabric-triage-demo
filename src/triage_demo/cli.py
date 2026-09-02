@@ -1100,7 +1100,11 @@ def cmd_health(args: argparse.Namespace) -> int:
         )
         return 0
     for line in lines:
-        console.print(line)
+        # Findings quote DAX identifiers like fact_sales_invoice[source_system],
+        # and Rich reads the brackets as a style tag. Unescaped, the sweep
+        # announced that an object had gone without saying which one -- the only
+        # part of the sentence anybody needs.
+        console.print(escape(line))
     return 0
 
 

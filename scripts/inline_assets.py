@@ -129,7 +129,13 @@ def inline_images(html: str, base: Path) -> tuple[str, int]:
 
         uri = _data_uri(path)
         # A lambda replacement keeps base64 from being read as backreferences.
-        tag = _SRC_ATTR.sub(lambda _: f'src="{uri}"', tag, count=1)
+        tag, replaced = _SRC_ATTR.subn(lambda _: f'src="{uri}"', tag, count=1)
+        if not replaced:
+            # An <img> written with only data-src has nothing to substitute into.
+            # Counting it as inlined and leaving it without a src produces a
+            # figure that is empty in the shared copy and fine locally, which is
+            # the exact failure this script exists to prevent.
+            tag = tag.replace("<img", f'<img src="{uri}"', 1)
         if recorded is None:
             tag = tag.replace("<img", f'<img data-src="{rel}"', 1)
         count += 1
