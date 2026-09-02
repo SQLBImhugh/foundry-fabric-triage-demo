@@ -216,7 +216,7 @@ alerts when it crashes is worse than no agent.
 Not today — production hardening, tenant integration and security review were
 scoped out. What exists is the shape: the interfaces are already there and the
 tool implementations swap behind them. The work that remains is the production
-table in [`plan.md`](plan.md), and it is real work.
+table in [`plan.md`](../docs/history/plan.md), and it is real work.
 
 ### "How do you test something non-deterministic?"
 

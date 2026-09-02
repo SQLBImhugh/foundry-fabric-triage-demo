@@ -124,7 +124,7 @@ async def test_refreshing_first_leaves_no_budget_to_re_arm(
     agent needs one write, not two.
 
     A per-playbook budget is the honest way to support both, and is listed as
-    production work in docs/plan.md.
+    production work in docs/history/plan.md.
     """
     ctx = _ctx(sample_request, tmp_path, history=STILL_BROKEN)
     dispatcher = ToolDispatcher(ctx)

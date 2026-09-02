@@ -25,8 +25,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-REPO = Path(__file__).resolve().parents[1]
-WALKTHROUGH = REPO / "walkthrough"
+REPO = Path(__file__).resolve().parents[2]
+WALKTHROUGH = REPO / "demo" / "walkthrough"
 PAGES = ("WALKTHROUGH.html", "PERSONAS.html")
 
 # The policy the OneDrive/SharePoint HTML preview applies. Anything the page

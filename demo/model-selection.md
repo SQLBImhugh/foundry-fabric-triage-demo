@@ -5,7 +5,7 @@ only variable is the model and the provider pointed at real Foundry so the
 reasoning is real. The scenarios carry `expect` blocks, so "did it behave
 correctly" is a deterministic check rather than a judgement call.
 
-Reproduce with `python scripts/compare_models.py`.
+Reproduce with `python demo/scripts/compare_models.py`.
 
 ## Result
 

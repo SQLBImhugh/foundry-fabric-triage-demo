@@ -30,8 +30,8 @@ from pathlib import Path
 
 logger = logging.getLogger("triage.inline_assets")
 
-REPO = Path(__file__).resolve().parents[1]
-WALKTHROUGH = REPO / "walkthrough"
+REPO = Path(__file__).resolve().parents[2]
+WALKTHROUGH = REPO / "demo" / "walkthrough"
 PAGES = ("WALKTHROUGH.html", "PERSONAS.html")
 
 MIME = {

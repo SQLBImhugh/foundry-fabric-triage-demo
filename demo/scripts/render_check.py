@@ -12,11 +12,11 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 OUT = REPO / ".browser-debug"
 PAGES = {
-    "personas": REPO / "walkthrough" / "PERSONAS.html",
-    "walkthrough": REPO / "walkthrough" / "WALKTHROUGH.html",
+    "personas": REPO / "demo" / "walkthrough" / "PERSONAS.html",
+    "walkthrough": REPO / "demo" / "walkthrough" / "WALKTHROUGH.html",
 }
 
 

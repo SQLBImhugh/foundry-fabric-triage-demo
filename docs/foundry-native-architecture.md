@@ -3,7 +3,7 @@
 **Spiked 2026-08-27** against a live project (`denverdata-foundry-cus/denver`,
 `gpt-4o`). Everything below marked *verified* was executed, not read.
 
-Reproduce with `scripts\spike_a2a_ledger.py`.
+Reproduce with `docs\history\spike_a2a_ledger.py`.
 
 ---
 

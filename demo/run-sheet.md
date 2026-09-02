@@ -27,7 +27,7 @@ azd ai agent show bi-triage-controller        # hosted controller is running
       a channel when a webhook request is received"**) and:
 
       ```powershell
-      python scripts\setup_teams_webhook.py --set-url "<url>"
+      python demo\scripts\setup_teams_webhook.py --set-url "<url>"
       azd deploy bi-triage-controller --no-prompt
       ```
 
@@ -105,7 +105,7 @@ check. The agent is granted one mailbox and denied another, and the controller
 > things?" is what decides whether you deploy it.
 
 **If the room is more business than technical**, open
-[`walkthrough/PERSONAS.html`](../walkthrough/PERSONAS.html) instead of the tool
+[`walkthrough/PERSONAS.html`](walkthrough/PERSONAS.html) instead of the tool
 list. It tells the same story through the analyst who reads the report and the
 engineer who gets paged, and it lands better with people who do not want to see
 a JSON schema in the first two minutes.

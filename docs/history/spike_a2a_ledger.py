@@ -43,7 +43,7 @@ from typing import Any
 
 import httpx
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from triage_demo.policy import PolicyLedger, PolicyViolation, TriagePolicy  # noqa: E402
 from triage_demo.tools.dataset import detect_duplicates  # noqa: E402
@@ -55,7 +55,7 @@ RESPONSES_URL = f"{PROJECT_ENDPOINT}/openai/v1/responses"
 DQ_AGENT = "bi-data-quality"
 SCOPE = "https://ai.azure.com"
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def token() -> str:

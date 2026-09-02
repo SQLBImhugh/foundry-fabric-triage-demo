@@ -4,7 +4,7 @@ Running it after the demo is over: what runs on a schedule, how to turn each
 part off, and what to look at when it behaves unexpectedly.
 
 For first-time setup see [`provisioning.md`](provisioning.md). For the live
-demo script see [`run-sheet.md`](run-sheet.md).
+demo script see [`run-sheet.md`](../demo/run-sheet.md).
 
 ## What runs, and when
 

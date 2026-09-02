@@ -120,7 +120,7 @@ agent, so a second agent does not double the ceiling.
 ## Change the model
 
 `FOUNDRY_AGENT_MODEL` for the Foundry path, `AZURE_OPENAI_DEPLOYMENT` for the
-direct path. See [`model-selection.md`](model-selection.md) for what the choice
+direct path. See [`model-selection.md`](../demo/model-selection.md) for what the choice
 affects and what to do when a deployment is unavailable.
 
 After any prompt or tool-schema change, re-register:

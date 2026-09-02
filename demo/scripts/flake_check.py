@@ -18,7 +18,7 @@ import sys
 import time
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 EXE = REPO / ".venv" / "Scripts" / "triage-demo.exe"
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 RUNS = int(os.environ.get("FLAKE_RUNS", "5"))

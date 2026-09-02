@@ -2,7 +2,7 @@
 
 Every other path here reacts to an alert. These failures send none: the
 refresh reports success and the data is wrong anyway, so the report is trusted
-until somebody notices the numbers by eye. `walkthrough/PERSONAS.html` names
+until somebody notices the numbers by eye. `demo/walkthrough/PERSONAS.html` names
 exactly this as the analyst's problem -- "a report that looks normal but is a
 day stale" -- and until now it was the one case the system could not see.
 

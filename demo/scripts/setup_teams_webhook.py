@@ -45,7 +45,7 @@ from _tenant import optional, required
 from playwright.sync_api import Page, sync_playwright
 from playwright.sync_api import TimeoutError as PWTimeout
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 PROFILE = REPO / ".browser-profile"          # gitignored
 DEBUG = REPO / ".browser-debug"              # gitignored; screenshots on failure
 

@@ -80,7 +80,7 @@ azd ai agent monitor bi-triage-controller
     links, and the SharePoint/Teams preview renders an `.html` under a policy
     that drops external stylesheets and images *without reporting it* — the
     page simply arrives unstyled with empty figures. After recapturing a
-    screenshot or editing `walkthrough.css`, run `scripts/inline_assets.py`.
+    screenshot or editing `walkthrough.css`, run `demo/scripts/inline_assets.py`.
 16. **State that must survive an invocation goes in a store, never on an
     object.** A hosted agent is constructed fresh for every request, so an
     instance attribute is always empty on arrival. Tracking already-triaged
@@ -108,7 +108,7 @@ traceable. If running in Foundry mode, **re-register the agents** or the change
 does not take effect.
 
 **A screenshot**: capture it into `walkthrough/shots/`, reference it normally
-with `<img src="shots/...">`, then run `scripts/inline_assets.py` to embed it.
+with `<img src="shots/...">`, then run `demo/scripts/inline_assets.py` to embed it.
 The original path is kept in `data-src`, so the embed can always be refreshed.
 
 **A playbook**: add a `Playbook` to `knowledge/playbooks.py` with triggers, a

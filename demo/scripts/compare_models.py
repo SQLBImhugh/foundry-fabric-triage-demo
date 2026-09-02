@@ -18,7 +18,7 @@ import sys
 import time
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 EXE = REPO / ".venv" / "Scripts" / "triage-demo.exe"
 sys.path.insert(0, str(REPO / "src"))
 

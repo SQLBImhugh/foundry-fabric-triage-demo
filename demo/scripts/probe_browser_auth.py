@@ -34,7 +34,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 PROFILE = Path.home() / ".cache" / "bitriage-probe-profile"
-SHOTS = Path(__file__).resolve().parents[1] / "walkthrough" / "shots" / "_probe"
+SHOTS = Path(__file__).resolve().parents[2] / "demo" / "walkthrough" / "shots" / "_probe"
 
 TARGETS = {
     "power-automate": "https://make.powerautomate.com/",

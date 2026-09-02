@@ -21,9 +21,15 @@ from triage_demo.cli import build_parser
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+#: Every prose document that makes checkable claims. Demo material lives under
+#: `demo/` and project history under `docs/history/`, and both are included on
+#: purpose: separating them from the adopter path is not a reason to stop
+#: checking them, and history is exactly where stale claims accumulate.
 DOCS = (
     [REPO_ROOT / "README.md", REPO_ROOT / "AGENTS.md"]
     + sorted((REPO_ROOT / "docs").glob("*.md"))
+    + sorted((REPO_ROOT / "docs" / "history").glob("*.md"))
+    + sorted((REPO_ROOT / "demo").glob("*.md"))
     + sorted((REPO_ROOT / ".github").glob("*.md"))
 )
 
@@ -144,7 +150,7 @@ def test_teams_delivery_claim_matches_reality() -> None:
     delivery is unwired -- a document implying a delivered notification that
     never arrives is the single most damaging inaccuracy this repo could ship.
     """
-    walkthrough = (REPO_ROOT / "walkthrough" / "WALKTHROUGH.html").read_text(
+    walkthrough = (REPO_ROOT / "demo" / "walkthrough" / "WALKTHROUGH.html").read_text(
         encoding="utf-8", errors="ignore"
     )
     claims_live = "shot-teams-live.png" in walkthrough
@@ -164,7 +170,7 @@ def test_the_walkthrough_does_not_contradict_itself_on_test_count() -> None:
     circular -- adding a test would fail it -- but the page agreeing with
     itself is a real, non-circular property, and it is the one that broke.
     """
-    walkthrough = (REPO_ROOT / "walkthrough" / "WALKTHROUGH.html").read_text(
+    walkthrough = (REPO_ROOT / "demo" / "walkthrough" / "WALKTHROUGH.html").read_text(
         encoding="utf-8", errors="ignore"
     )
     claimed = set(re.findall(r"(\d+)\s+(?:offline\s+tests|tests\s+pass\s+offline)", walkthrough))
@@ -225,7 +231,7 @@ def test_no_developer_machine_paths_are_committed() -> None:
     """
     offenders: list[str] = []
     pattern = re.compile(r"[A-Za-z]:\\+Users\\+(?!<)[A-Za-z0-9._-]+", re.I)
-    for path in sorted((REPO_ROOT / "scripts").glob("*.py")) + sorted(
+    for path in sorted((REPO_ROOT / "demo" / "scripts").glob("*.py")) + sorted(
         (REPO_ROOT / "src").rglob("*.py")
     ):
         for number, line in enumerate(

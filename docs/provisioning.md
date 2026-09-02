@@ -188,15 +188,15 @@ the template and copy the generated HTTP POST URL into `TEAMS_WEBHOOK_URL`.
 Edge reaches Power Automate fully signed in with no credentials, because Windows
 SSO applies — but it signs in to the **corporate** tenant, not the demo tenant.
 A webhook created that way would land in the wrong place and still look like it
-had worked. `scripts/probe_browser_auth.py` reproduces the finding.
+had worked. `demo/scripts/probe_browser_auth.py` reproduces the finding.
 
-`scripts/setup_teams_webhook.py` handles this in two steps:
+`demo/scripts/setup_teams_webhook.py` handles this in two steps:
 
 ```powershell
-python scripts\setup_teams_webhook.py --login            # once; you sign in
-python scripts\setup_teams_webhook.py --create --headed  # unattended after that
-python scripts\setup_teams_webhook.py --check            # is the session still good?
-python scripts\setup_teams_webhook.py --set-url "<url>"  # if you made it by hand
+python demo\scripts\setup_teams_webhook.py --login            # once; you sign in
+python demo\scripts\setup_teams_webhook.py --create --headed  # unattended after that
+python demo\scripts\setup_teams_webhook.py --check            # is the session still good?
+python demo\scripts\setup_teams_webhook.py --set-url "<url>"  # if you made it by hand
 ```
 
 The captured URL goes straight into the azd environment and is never printed in

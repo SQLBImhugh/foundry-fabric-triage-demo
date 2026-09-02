@@ -30,5 +30,5 @@ Without re-registering, the change has no effect and the run looks unaltered.
 
 ## If this changes docs or the walkthrough
 
-- [ ] `python scripts/inline_assets.py` re-run after any screenshot or CSS change
+- [ ] `python demo/scripts/inline_assets.py` re-run after any screenshot or CSS change
 - [ ] Counts and dates still accurate

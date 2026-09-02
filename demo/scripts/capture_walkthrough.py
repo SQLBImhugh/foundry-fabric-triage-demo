@@ -17,14 +17,14 @@ from pathlib import Path
 from rich.console import Console
 from rich.markup import escape
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 import triage_demo.cli as cli  # noqa: E402
 from triage_demo.runner import Scenario, TriageRunner, check_expectations  # noqa: E402
 from triage_demo.settings import settings  # noqa: E402
 
-OUT = REPO_ROOT / "walkthrough" / "shots"
+OUT = REPO_ROOT / "demo" / "walkthrough" / "shots"
 
 RUNS: list[tuple[str, str, bool]] = [
     # (scenario, output stem, keep_incidents)

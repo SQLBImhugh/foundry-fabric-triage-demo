@@ -213,7 +213,7 @@ the story.
 | Durable incident store | `src/triage_demo/store/azure_table.py` |
 | Inbox relevance filter | `src/triage_demo/tools/mail_filter.py` |
 | Agent identity inspection | `src/triage_demo/identity.py`, `triage-demo identity` |
-| Model chosen by measurement | `scripts/compare_models.py`, `docs/model-selection.md` |
+| Model chosen by measurement | `demo/scripts/compare_models.py`, `docs/model-selection.md` |
 
 **The routine does not work, and that is a platform issue rather than a
 configuration one.** It is registered with a five-minute cron, the API reports
@@ -241,7 +241,7 @@ What the tenant actually does, verified rather than assumed:
 - The container federates a **workload identity**, not an IMDS managed identity.
 
 Full detail, including the things that only surfaced by trying them:
-[`hosted-architecture.md`](hosted-architecture.md).
+[`hosted-architecture.md`](../hosted-architecture.md).
 
 **Exit criteria (met)**: an incident written by the container in Azure is
 readable from another machine, which proves it authenticated as itself.
@@ -256,11 +256,11 @@ readable from another machine, which proves it authenticated as itself.
 - [x] Customer walkthrough captured — `walkthrough/WALKTHROUGH.html`
 - [x] Offline fallback verified: two env vars and the demo keeps running
 - [x] Model fallback registered and passing, needing no provisioning
-- [x] **Two consecutive clean rehearsals** — `python scripts/rehearse.py`
+- [x] **Two consecutive clean rehearsals** — `python demo/scripts/rehearse.py`
 
 **The rehearsal earned its place immediately.** The first attempt was clean on
 run one and failed two scenarios on run two, which is exactly the failure a
-single rehearsal cannot find. `python scripts/flake_check.py` then measured it:
+single rehearsal cannot find. `python demo/scripts/flake_check.py` then measured it:
 `scenario2b` was 5/5, but `scenario4-unknown-action` failed **2 runs in 5**.
 
 The cause was ours, not the model's. When the controller refused an action, the
@@ -294,7 +294,7 @@ Outstanding, and honestly small:
 
 ### Phase 8 — Demo day ⬜ NOT STARTED
 
-Run sheet: [`run-sheet.md`](run-sheet.md). Question prep: [`faq.md`](faq.md).
+Run sheet: [`run-sheet.md`](../../demo/run-sheet.md). Question prep: [`faq.md`](../../demo/faq.md).
 
 Open with `triage-demo identity --check-scope` if anyone from security or
 identity is in the room; it reframes everything that follows.
@@ -303,7 +303,7 @@ identity is in the room; it reframes everything that follows.
 **Data Platform Operations → BI Alerts**. A webhook can be deleted or its flow
 disabled without anything else changing, so run one scenario before the session
 rather than assuming. If it has stopped, recreate it from the channel and
-`python scripts\setup_teams_webhook.py --set-url "<url>"`.
+`python demo\scripts\setup_teams_webhook.py --set-url "<url>"`.
 
 ---
 
@@ -328,7 +328,7 @@ captured run — but real accounts would be the prerequisite for avatars in Team
 
 Generates rather than curates, so the bundle cannot drift from the code, and
 refuses to ship if it finds a credential. Contents and the framing to use when
-handing it over: [`handoff.md`](handoff.md).
+handing it over: [`handoff.md`](../../demo/handoff.md).
 
 The credential scanner shipped broken and was caught by testing it rather than
 trusting it: a leading word boundary meant `GRAPH_CLIENT_SECRET=...` never
@@ -362,7 +362,7 @@ Phase 6 was not in the original estimate and came in around 1.5 days. Most of
 that was not writing code: it was establishing which Microsoft services accept
 an Entra agent identity and which do not, by trying them. That is the cost
 nobody budgets for, and it is the reason
-[`hosted-architecture.md`](hosted-architecture.md) exists — so the next project
+[`hosted-architecture.md`](../hosted-architecture.md) exists — so the next project
 pays it once rather than again.
 
 ### Production-grade equivalent

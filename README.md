@@ -13,9 +13,9 @@ Graph, Power BI and Teams when you configure it.
 [**Quick start**](#quick-start) &nbsp;|&nbsp;
 [**Deploy to Azure**](#deploy-to-azure) &nbsp;|&nbsp;
 [**Architecture**](docs/architecture.md) &nbsp;|&nbsp;
-[**Walkthrough**](walkthrough/WALKTHROUGH.html) &nbsp;|&nbsp;
+[**Walkthrough**](demo/walkthrough/WALKTHROUGH.html) &nbsp;|&nbsp;
 [**Security**](SECURITY.md) &nbsp;|&nbsp;
-[**FAQ**](docs/faq.md)
+[**FAQ**](demo/faq.md)
 
 ---
 
@@ -126,7 +126,7 @@ triage-demo identity --check-scope    # who the agents are, read from the direct
 | [Azure Developer CLI](https://aka.ms/azd) | `azd` drives the deployment |
 | Python 3.11+ | |
 | An Entra app registration | For Graph mail, Power BI and Teams — see [`docs/provisioning.md`](docs/provisioning.md) |
-| A model deployment | Defaults to `gpt-4.1`; see [`docs/model-selection.md`](docs/model-selection.md) |
+| A model deployment | Defaults to `gpt-4.1`; see [`demo/model-selection.md`](demo/model-selection.md) |
 
 ### Cost
 
@@ -157,7 +157,7 @@ azd ai agent monitor bi-triage-controller
 
 What must exist in the tenant first is in
 [`docs/provisioning.md`](docs/provisioning.md); the end-to-end live sequence is
-in [`docs/run-sheet.md`](docs/run-sheet.md).
+in [`demo/run-sheet.md`](demo/run-sheet.md).
 
 ### Running modes
 
@@ -278,16 +278,30 @@ src/triage_demo/
     retries.py         Deferred retries with exponential backoff
     semantic_health.py Health baselines, advanced only from healthy readings
 
-scenarios/*.yaml       Runnable scenarios, each with assertions
-mock/                  Seeded data and inbox messages
-scripts/               Agent registration, capture, packaging
-docs/                  Architecture, run sheet, FAQ, provisioning
+scenarios/*.yaml       Runnable scenarios, each with assertions -- these are the tests
+mock/                  Seeded data and inbox messages the scenarios read
+scripts/               Agent registration, the credential scan, the README diagram
 tests/                 The offline suite; test_hardening.py pins regressions
+
+docs/                  Architecture, provisioning, operations, customization
+docs/history/          Build plan and research scope -- provenance, not instructions
+demo/                  Everything needed to *present* it, and nothing needed to adopt it
+  run-sheet.md           The live script
+  faq.md                 Question prep
+  walkthrough/           Two self-contained HTML pages
+  scripts/               Capture, rehearsal, demo-tenant setup
 ```
+
+Demo material is separated so that someone evaluating the accelerator does not
+have to work out which files are the product and which are the show. See
+[`demo/README.md`](demo/README.md). Scenarios and mock data stay at the top level
+because they are the test suite, not demo dressing.
 
 ---
 
 ## Documentation
+
+**Adopting it**
 
 | Question | File |
 |---|---|
@@ -295,16 +309,21 @@ tests/                 The offline suite; test_hardening.py pins regressions
 | What runs where in Azure, under which identity? | [`docs/hosted-architecture.md`](docs/hosted-architecture.md) |
 | Which Foundry features are native vs. hand-rolled? | [`docs/foundry-native-architecture.md`](docs/foundry-native-architecture.md) |
 | What has to exist in the tenant first? | [`docs/provisioning.md`](docs/provisioning.md) |
-| How do I run it live, end to end? | [`docs/run-sheet.md`](docs/run-sheet.md) |
 | How do I adapt it to my failures and my tools? | [`docs/customization.md`](docs/customization.md) |
 | What runs on a schedule, and how do I turn it off? | [`docs/operations.md`](docs/operations.md) |
-| Why this model, and what if it is unavailable? | [`docs/model-selection.md`](docs/model-selection.md) |
-| Common questions | [`docs/faq.md`](docs/faq.md) |
-| What do I hand over afterwards, and what must not go in it? | [`docs/handoff.md`](docs/handoff.md) |
-| Annotated screenshots of real runs | [`walkthrough/WALKTHROUGH.html`](walkthrough/WALKTHROUGH.html) |
-| The same runs from the user's point of view | [`walkthrough/PERSONAS.html`](walkthrough/PERSONAS.html) |
-| Rules for AI agents working in this repo | [`AGENTS.md`](AGENTS.md) |
 | How to contribute | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| Rules for AI agents working in this repo | [`AGENTS.md`](AGENTS.md) |
+
+**Presenting it** — see [`demo/README.md`](demo/README.md)
+
+| Question | File |
+|---|---|
+| How do I run the demo live, end to end? | [`demo/run-sheet.md`](demo/run-sheet.md) |
+| What gets asked in the room? | [`demo/faq.md`](demo/faq.md) |
+| Why this model, and what if it is unavailable? | [`demo/model-selection.md`](demo/model-selection.md) |
+| What do I hand over afterwards, and what must not go in it? | [`demo/handoff.md`](demo/handoff.md) |
+| Annotated screenshots of real runs | [`demo/walkthrough/WALKTHROUGH.html`](demo/walkthrough/WALKTHROUGH.html) |
+| The same runs from the user's point of view | [`demo/walkthrough/PERSONAS.html`](demo/walkthrough/PERSONAS.html) |
 
 The walkthrough pages are self-contained: the stylesheet and every screenshot are
 embedded. That is what makes them shareable. SharePoint and Teams render an
@@ -314,9 +333,9 @@ figures and no explanation. Share the link the **Share** button gives you; a raw
 file path downloads the file rather than previewing it.
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\capture_walkthrough.py
-.\.venv\Scripts\python.exe scripts\inline_assets.py   # re-embed the new captures
-.\.venv\Scripts\python.exe scripts\preview_check.py   # render under the preview policy
+.\.venv\Scripts\python.exe demo\scripts\capture_walkthrough.py
+.\.venv\Scripts\python.exe demo\scripts\inline_assets.py   # re-embed the new captures
+.\.venv\Scripts\python.exe demo\scripts\preview_check.py   # render under the preview policy
 ```
 
 Skipping the second step leaves the shared copy showing the previous

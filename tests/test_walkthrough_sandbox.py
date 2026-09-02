@@ -25,11 +25,11 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "scripts"))
+sys.path.insert(0, str(REPO_ROOT / "demo" / "scripts"))
 
 inline_assets = pytest.importorskip("inline_assets")
 
-WALKTHROUGH = REPO_ROOT / "walkthrough"
+WALKTHROUGH = REPO_ROOT / "demo" / "walkthrough"
 PAGES = ("WALKTHROUGH.html", "PERSONAS.html")
 
 
@@ -77,7 +77,7 @@ def test_pages_are_not_stale(name: str) -> None:
     html, _ = inline_assets.flatten_doc_links(html)
 
     assert html == current, (
-        f"{name} is out of date with walkthrough/ -- run scripts/inline_assets.py"
+        f"{name} is out of date with walkthrough/ -- run demo/scripts/inline_assets.py"
     )
 
 
@@ -140,7 +140,7 @@ def test_every_scenario_is_captured_for_the_walkthrough() -> None:
     """
     import sys
 
-    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    sys.path.insert(0, str(REPO_ROOT / "demo" / "scripts"))
     from capture_walkthrough import RUNS
 
     on_disk = {p.stem for p in (REPO_ROOT / "scenarios").glob("*.yaml")}
@@ -160,10 +160,10 @@ def test_the_walkthrough_shows_every_captured_run() -> None:
     """A capture nobody embedded is a capture nobody sees."""
     import sys
 
-    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    sys.path.insert(0, str(REPO_ROOT / "demo" / "scripts"))
     from capture_walkthrough import RUNS
 
-    html = (REPO_ROOT / "walkthrough" / "WALKTHROUGH.html").read_text(
+    html = (REPO_ROOT / "demo" / "walkthrough" / "WALKTHROUGH.html").read_text(
         encoding="utf-8", errors="ignore"
     )
     missing = [stem for _name, stem, _keep in RUNS if f'shots/{stem}.svg' not in html]

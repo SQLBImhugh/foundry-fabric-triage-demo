@@ -16,9 +16,9 @@ from pathlib import Path
 from _tenant import required
 from playwright.sync_api import sync_playwright
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 PROFILE = REPO / ".browser-profile"
-OUT = REPO / "walkthrough" / "shots"
+OUT = REPO / "demo" / "walkthrough" / "shots"
 DEBUG = REPO / ".browser-debug"
 
 TENANT = required("GRAPH_TENANT_ID", "the tenant whose Teams channel is captured")

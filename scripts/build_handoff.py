@@ -190,18 +190,32 @@ def main() -> int:
         shutil.copy2(prompt, prompts / prompt.name)
         print(f"  prompts/{prompt.name}")
 
-    for doc in ("hosted-architecture.md", "model-selection.md", "handoff.md",
-                "architecture.md", "faq.md", "provisioning.md"):
-        source = REPO / "docs" / doc
-        if source.exists():
-            shutil.copy2(source, OUT / doc)
-            print(f"  {doc}")
+    # Explicit paths, and a hard failure if one is missing. These used to be
+    # looked up under docs/ with an `if exists` guard, so when three of them
+    # moved to demo/ the bundle would have quietly shipped without them --
+    # smaller, still exit 0, and nobody the wiser until a customer opened it.
+    for doc in (
+        REPO / "docs" / "hosted-architecture.md",
+        REPO / "docs" / "architecture.md",
+        REPO / "docs" / "provisioning.md",
+        REPO / "demo" / "model-selection.md",
+        REPO / "demo" / "handoff.md",
+        REPO / "demo" / "faq.md",
+    ):
+        if not doc.exists():
+            raise SystemExit(
+                f"Handoff bundle is missing {doc.relative_to(REPO).as_posix()}. "
+                "It was probably moved; update this list rather than shipping "
+                "an incomplete bundle."
+            )
+        shutil.copy2(doc, OUT / doc.name)
+        print(f"  {doc.name}")
 
     shutil.copy2(REPO / ".env.example", OUT / ".env.example")
     print("  .env.example")
 
     walkthrough = OUT / "walkthrough"
-    shutil.copytree(REPO / "walkthrough", walkthrough)
+    shutil.copytree(REPO / "demo" / "walkthrough", walkthrough)
     print(f"  walkthrough/ ({len(list(walkthrough.rglob('*')))} files)")
 
     # Refuse to ship a credential. This is the last line of defence, not the

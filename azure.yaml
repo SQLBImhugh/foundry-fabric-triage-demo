@@ -124,8 +124,8 @@ services:
             # Teams delivery. Empty means the notifier stays mocked, which is
             # the correct fallback rather than a failure: a demo should not die
             # because a webhook is missing. Populate it with
-            #   python scripts\setup_teams_webhook.py --login   (once)
-            #   python scripts\setup_teams_webhook.py --create
+            #   python demo\scripts\setup_teams_webhook.py --login   (once)
+            #   python demo\scripts\setup_teams_webhook.py --create
             # then redeploy. The URL is a bearer credential -- anyone holding it
             # can post to that channel -- so it lives in the azd environment,
             # which is gitignored, and never in this file.
