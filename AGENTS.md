@@ -4,9 +4,14 @@ Bootstrap contract for any coding agent working in this repo.
 
 ## What this is
 
-A demo of a multi-agent BI triage loop on Azure AI Foundry. It is a **customer-
-facing demonstration asset**, not a product. Optimise for legibility and for
-being able to explain any line of it out loud, over cleverness.
+A public MIT-licensed **solution accelerator**: a multi-agent BI triage loop on
+Azure AI Foundry. It is sample code, not a supported product. Optimise for
+legibility and for being able to explain any line of it out loud, over
+cleverness — assume every comment may be read aloud to a customer.
+
+It is also demonstrated live, and everything needed to present it lives under
+`demo/`. Keep that boundary: `docs/` is what an adopter reads, `demo/` is the
+show, and `docs/history/` is provenance.
 
 It runs fully offline. Keep it that way.
 

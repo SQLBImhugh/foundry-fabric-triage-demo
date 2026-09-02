@@ -10,9 +10,14 @@ A multi-agent BI triage loop on Azure AI Foundry: a Power BI refresh fails, an
 alert arrives by email, and a controller gathers evidence, consults a data
 quality agent, and remediates within policy — or refuses to.
 
-It is a **customer-facing demonstration asset**, not a product. Optimise for
-legibility and for being able to explain any line of it out loud, over
-cleverness. Assume every comment may be read aloud to a customer.
+It is a public MIT-licensed **solution accelerator** — sample code, not a
+supported product. Optimise for legibility and for being able to explain any
+line of it out loud, over cleverness. Assume every comment may be read aloud to
+a customer.
+
+It is also demonstrated live. Everything needed to present it lives under
+`demo/`; `docs/` is what an adopter reads and `docs/history/` is provenance.
+Keep that boundary.
 
 It runs **fully offline** with mock providers and mock tools. Keep it that way:
 that is the rehearsal path and the demo-day fallback.

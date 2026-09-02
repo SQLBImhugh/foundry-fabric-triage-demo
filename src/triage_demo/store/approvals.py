@@ -36,6 +36,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from triage_demo.store.table_helpers import build_table_client
+
 logger = logging.getLogger("triage.store.approvals")
 
 
@@ -238,16 +240,7 @@ class AzureTableApprovalChannel(InMemoryApprovalChannel):
         return self._client is not None and not self._degraded
 
     def _build_client(self, credential: Any):
-        from azure.data.tables import TableServiceClient
-
-        if credential is None:
-            from azure.identity import DefaultAzureCredential
-
-            credential = DefaultAzureCredential()
-
-        service = TableServiceClient(endpoint=self._endpoint, credential=credential)
-        service.create_table_if_not_exists(self._table_name)
-        return service.get_table_client(self._table_name)
+        return build_table_client(self._endpoint, self._table_name, credential)
 
     def _fetch(self, request_id: str) -> dict[str, Any] | None:
         if self._client is None:

@@ -35,6 +35,7 @@ import logging
 from typing import Any
 
 from triage_demo.store.incidents import Incident, InMemoryIncidentStore, _utcnow
+from triage_demo.store.table_helpers import build_table_client
 
 logger = logging.getLogger("triage.store.table")
 
@@ -87,21 +88,12 @@ class AzureTableIncidentStore(InMemoryIncidentStore):
         return self._client is not None and not self._degraded
 
     def _build_client(self, credential: Any):
-        from azure.data.tables import TableServiceClient
-
-        if credential is None:
-            # The controller authenticates as its own agent identity when it
-            # runs in Foundry. DefaultAzureCredential is deliberately avoided
-            # elsewhere in this codebase, but a *table* is not mail: the worst
-            # case of falling back to a developer login here is writing demo
-            # incidents to a demo table as yourself.
-            from azure.identity import DefaultAzureCredential
-
-            credential = DefaultAzureCredential()
-
-        service = TableServiceClient(endpoint=self._endpoint, credential=credential)
-        service.create_table_if_not_exists(self._table_name)
-        return service.get_table_client(self._table_name)
+        # The controller authenticates as its own agent identity when it runs
+        # in Foundry. DefaultAzureCredential is deliberately avoided elsewhere
+        # in this codebase, but a *table* is not mail: the worst case of
+        # falling back to a developer login here is writing demo incidents to a
+        # demo table as yourself.
+        return build_table_client(self._endpoint, self._table_name, credential)
 
     # --- durability hooks --------------------------------------------------
 
