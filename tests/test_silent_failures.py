@@ -1011,3 +1011,41 @@ def test_preflight_warns_when_staleness_is_not_watched() -> None:
     ]))
     assert code == 0
     assert "staleness is not watched" in out
+
+@pytest.mark.asyncio
+async def test_a_stale_model_still_gets_a_schema_baseline() -> None:
+    """Regression: schema watching silently never engaged on a broken model.
+
+    The schema read used to be skipped whenever the data already looked wrong,
+    so a model with a standing finding never recorded a baseline and drift
+    could never be detected on it -- monitoring that quietly does nothing, on
+    exactly the models most likely to be broken.
+    """
+    store = InMemorySemanticHealthStore()
+    stale = MockSemanticHealthClient(max_date="2020-01-01", schema=SCHEMA_V1)
+
+    finding = await _scanner(stale, store).scan(_probe(watch_schema=True))
+
+    assert finding.kind == "stale", "the louder problem still wins the sentence"
+    state = store.get("ws-1", "ds-1", "sales-freshness")
+    assert tuple(state.last_schema) == tuple(sorted(SCHEMA_V1))
+
+
+@pytest.mark.asyncio
+async def test_drift_under_a_stale_model_is_not_learned_as_normal() -> None:
+    """A removal must not be absorbed into the baseline while staleness is reported."""
+    store = InMemorySemanticHealthStore()
+    probe = _probe(watch_schema=True, confirmations=1)
+    await _scanner(MockSemanticHealthClient(max_date=_yesterday(), schema=SCHEMA_V1), store).scan(probe)
+
+    dropped = tuple(e for e in SCHEMA_V1 if "Amount" not in e)
+    await _scanner(MockSemanticHealthClient(max_date="2020-01-01", schema=dropped), store).scan(probe)
+
+    # Baseline still holds the removed column, so the drift is reported once
+    # the staleness clears rather than being silently accepted.
+    state = store.get("ws-1", "ds-1", "sales-freshness")
+    assert "column:FactSales[Amount]" in state.last_schema
+
+    healthy_again = MockSemanticHealthClient(max_date=_yesterday(), schema=dropped)
+    finding = await _scanner(healthy_again, store).scan(probe)
+    assert finding.kind == "schema_drift"

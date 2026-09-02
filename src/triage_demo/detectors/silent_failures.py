@@ -287,8 +287,18 @@ class SilentFailureScanner:
 
         kind, detail = self._judge(probe, state, result)
 
+        # The schema is read even when the data already looks wrong. Skipping it
+        # meant a model with a standing finding never established a schema
+        # baseline at all, so drift could never be detected on precisely the
+        # models most likely to be broken -- monitoring that silently does
+        # nothing, which is the failure this component exists to prevent.
+        #
+        # Reporting order still favours the data: a model that stopped loading
+        # is the more urgent sentence. A drift found underneath it is recorded
+        # and surfaces once the louder problem clears.
+        schema_kind, schema_detail = await self._check_schema(probe, state)
         if kind == "":
-            kind, detail = await self._check_schema(probe, state)
+            kind, detail = schema_kind, schema_detail
 
         if kind == "":
             return self._record_healthy(probe, state, result)
