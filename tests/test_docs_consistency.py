@@ -12,6 +12,7 @@ trains people to update it without looking.
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 from pathlib import Path
@@ -359,13 +360,37 @@ def test_routine_inputs_reach_a_command_the_agent_handles() -> None:
     an incoming alert". A typo in `input:` would therefore not fail -- it would
     quietly triage the literal string "silent sweep" as though it were a Power
     BI failure report, and look like it was working.
+
+    The command sets are read out of the source with `ast` rather than imported.
+    Importing `app` pulls in agent_framework, which the container has and the
+    offline test environment deliberately does not -- so an earlier version of
+    this test passed locally and failed every CI run.
     """
-    import sys
+    tree = ast.parse((REPO_ROOT / "src" / "app.py").read_text(encoding="utf-8"))
+    commands: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            name = getattr(target, "id", None)
+            if name in ("_SWEEP_COMMANDS", "_SILENT_COMMANDS"):
+                # Both are frozenset({...}) rather than bare literals, so unwrap
+                # the call before evaluating its argument.
+                value = node.value
+                if isinstance(value, ast.Call) and getattr(value.func, "id", "") in (
+                    "frozenset",
+                    "set",
+                ):
+                    value = value.args[0]
+                commands[name] = set(ast.literal_eval(value))
 
-    sys.path.insert(0, str(REPO_ROOT / "src"))
-    from app import _SILENT_COMMANDS, _SWEEP_COMMANDS
+    assert set(commands) == {"_SWEEP_COMMANDS", "_SILENT_COMMANDS"}, (
+        f"could not read the command sets out of src/app.py, found {sorted(commands)}. "
+        "If they were renamed or built dynamically, update this test rather than "
+        "letting it pass without checking anything."
+    )
 
-    handled = {c.lower() for c in _SWEEP_COMMANDS | _SILENT_COMMANDS}
+    handled = {c.lower() for c in commands["_SWEEP_COMMANDS"] | commands["_SILENT_COMMANDS"]}
     inputs = re.findall(r'^\s+input:\s*"([^"]*)"', (REPO_ROOT / "azure.yaml").read_text(
         encoding="utf-8"), re.M)
     assert inputs, "no routine inputs found in azure.yaml"
