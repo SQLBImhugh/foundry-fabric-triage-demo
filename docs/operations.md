@@ -21,12 +21,22 @@ Verified 2026-09-02, six days after registration, by three independent checks;
 see [`hosted-architecture.md`](hosted-architecture.md). Re-test it in your own
 tenant before enabling it — this may be regional, or already fixed.
 
-Until then, call the agent's endpoint from a scheduler you already trust:
+Until then, call the agent's endpoint from a scheduler you already trust. The
+two sweeps answer different questions and want different cadences:
 
 ```powershell
-azd ai agent invoke bi-triage-controller "sweep"          # drain the mailbox
-azd ai agent invoke bi-triage-controller "silent sweep"   # scan for silent failures
+azd ai agent invoke bi-triage-controller "sweep"          # every 5 min: drain the mailbox, perform due retries
+azd ai agent invoke bi-triage-controller "silent sweep"   # hourly: find models that failed without telling anyone
 ```
+
+The mailbox sweep does **not** run the health scan — "what arrived" and "what is
+quietly wrong" are different questions, and only the first has an alert behind
+it. Schedule both or the detector never runs.
+
+Hourly is enough for the second: a freshness probe on a daily model answers a
+question that changes once a day, and `executeQueries` is capped at 120/minute
+per user across every dataset, so polling hard makes the detector load on the
+capacity it is watching.
 
 Anything that can make an authenticated HTTPS call will do. The endpoint and the
 agent's own identity are in the azd environment:
@@ -53,14 +63,16 @@ triage-demo incidents        # nothing new since yesterday on a busy mailbox is 
 
 **Routine enabled-state is not managed by `azd deploy`.** Measured
 2026-09-02, both directions: deploying with `enabled: false` in `azure.yaml` left
-an enabled routine enabled, and a full rebuild left a disabled one disabled. An
-earlier version of this document said a deploy would silently re-enable a
-disabled routine; that was observed once and no longer reproduces. Use the
-explicit commands, and check afterwards rather than assuming:
+an enabled routine enabled, and a full rebuild left a disabled one disabled. A
+newly declared routine is not created either — measured 2026-09-03. An earlier
+version of this document said a deploy would silently re-enable a disabled
+routine; that was observed once and no longer reproduces. Manage routines with
+the CLI, and check afterwards rather than assuming:
 
 ```powershell
+azd ai routine create <name> --file <manifest.yaml>   # --file is the only way to set `input`
 azd ai routine disable bi-triage-schedule
-azd ai routine show bi-triage-schedule     # confirm; the deploy will not do it for you
+azd ai routine show bi-triage-schedule -o json        # confirm; the deploy will not do it for you
 ```
 
 **The silent-sweep off switch is configuration, not routine state**, for the same

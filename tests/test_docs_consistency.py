@@ -292,35 +292,63 @@ def test_both_agent_contracts_carry_the_same_safety_invariants(
     assert not missing, f"{missing} do not state the {name!r} invariant ({phrase!r})"
 
 
-def test_the_broken_routine_ships_disabled() -> None:
+def test_the_broken_routines_ship_disabled() -> None:
     """A scheduler that silently does nothing must not ship enabled.
 
-    Foundry routines are in preview and this one does not fire: verified six
-    days after registration by three independent checks, most decisively that
-    telemetry showed activity in two of twenty-four hours, both of them hours
-    when a person invoked the agent by hand.
+    Foundry routines are in preview and do not fire: verified six days after
+    registration by three independent checks, most decisively that telemetry
+    showed activity in two of twenty-four hours, both of them hours when a
+    person invoked the agent by hand.
 
     Left enabled, an adopter deploys, reads `enabled: true`, and never learns
     that their triage agent has not run since the day they installed it. That is
     the exact class of failure this accelerator exists to detect, so shipping it
     would be self-contradicting.
 
-    The declaration stays because the shape is right and costs nothing while
-    disabled. If you have verified it fires in your tenant, enable it there --
+    The declarations stay because the shape is right and costs nothing while
+    disabled. If you have verified they fire in your tenant, enable them there --
     but flipping this file back to `true` without that evidence is what this
     test is here to stop.
     """
-    routine = re.search(
-        r"bi-triage-schedule:.*?\n(\s+)enabled:\s*(\w+)",
-        (REPO_ROOT / "azure.yaml").read_text(encoding="utf-8"),
-        re.S,
+    text = (REPO_ROOT / "azure.yaml").read_text(encoding="utf-8")
+    routines = re.findall(
+        r"^\s{4}([a-z][\w-]*):\n(?:.*\n)*?\s+host:\s*azure\.ai\.routine\n(?:.*\n)*?\s+enabled:\s*(\w+)",
+        text,
+        re.M,
     )
-    assert routine is not None, "the routine declaration went missing"
-    assert routine.group(2) == "false", (
-        "bi-triage-schedule is enabled, but Foundry routines were last verified "
-        "not to fire. Re-verify with `azd ai routine run list bi-triage-schedule` "
-        "and update the evidence in azure.yaml and docs/hosted-architecture.md "
-        "before enabling it."
+    assert routines, "no routine declarations found in azure.yaml"
+
+    enabled = [name for name, flag in routines if flag != "false"]
+    assert not enabled, (
+        f"routines enabled: {enabled}. Foundry routines were last verified not to "
+        "fire. Re-verify with `azd ai routine run list <name>` and update the "
+        "evidence in azure.yaml and docs/hosted-architecture.md before enabling."
+    )
+
+
+def test_routine_inputs_reach_a_command_the_agent_handles() -> None:
+    """A routine's input word must match a command, or it is triaged as an alert.
+
+    The hosted agent routes on the message text: known words run a mailbox
+    sweep or a health sweep, and anything else falls through to "triage this as
+    an incoming alert". A typo in `input:` would therefore not fail -- it would
+    quietly triage the literal string "silent sweep" as though it were a Power
+    BI failure report, and look like it was working.
+    """
+    import sys
+
+    sys.path.insert(0, str(REPO_ROOT / "src"))
+    from app import _SILENT_COMMANDS, _SWEEP_COMMANDS
+
+    handled = {c.lower() for c in _SWEEP_COMMANDS | _SILENT_COMMANDS}
+    inputs = re.findall(r'^\s+input:\s*"([^"]*)"', (REPO_ROOT / "azure.yaml").read_text(
+        encoding="utf-8"), re.M)
+    assert inputs, "no routine inputs found in azure.yaml"
+
+    unhandled = [i for i in inputs if i.strip().lower() not in handled]
+    assert not unhandled, (
+        f"routine inputs no command handles: {unhandled}. These would be triaged "
+        f"as alert text instead of running a sweep. Handled: {sorted(handled)}"
     )
 
 

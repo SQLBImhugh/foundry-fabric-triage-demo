@@ -179,5 +179,42 @@ services:
             type: invoke_agent_responses_api
             agent_name: bi-triage-controller
             input: "scheduled sweep"
+
+    # The other trigger, and the one the mailbox sweep cannot cover. "scheduled
+    # sweep" above drains the inbox and performs due retries; it never runs the
+    # silent-failure scan, because that is a different question -- not "what
+    # arrived" but "what is quietly wrong and sent nothing".
+    #
+    # Without this declaration the detector has no scheduled trigger at all,
+    # even on a platform where routines work. It would run only when a person
+    # remembered to ask, which is the opposite of the point: these are the
+    # failures nobody is told about.
+    #
+    # Hourly rather than every five minutes. A freshness probe on a daily model
+    # answers a question that changes once a day, and executeQueries is capped
+    # at 120/minute per user across every dataset -- a detector that polls hard
+    # becomes load on the capacity it is watching. The scope document suggested
+    # fifteen minutes; hourly costs 24 queries a day per probe instead of 96 and
+    # still catches a missed 06:00 load well inside the working morning.
+    #
+    # Disabled for the same reason as the routine above: Foundry routines do not
+    # fire today, and a scheduler that silently does nothing is the exact failure
+    # this detector exists to find. Until they work, invoke it from a scheduler
+    # you already trust -- see docs/operations.md.
+    bi-triage-health-sweep:
+        host: azure.ai.routine
+        uses:
+            - bi-triage-controller
+        description: Look for models that failed without sending an alert
+        enabled: false
+        triggers:
+            default:
+                type: schedule
+                cron_expression: "0 * * * *"
+                time_zone: America/Chicago
+        action:
+            type: invoke_agent_responses_api
+            agent_name: bi-triage-controller
+            input: "silent sweep"
 infra:
     provider: microsoft.foundry

@@ -198,6 +198,29 @@ explicit sentinel, and only the most recent inbound message is read.
   azd ai routine run list bi-triage-schedule  # no runs
   ```
 
+- **`azd deploy` does not manage routines at all.** Measured three ways on
+  2026-09-02 and 2026-09-03: it does not apply `enabled:` from `azure.yaml` in
+  either direction, and it does not create a routine newly declared there. A
+  second routine added to the file stayed absent from the project through a
+  successful deploy, and `routine show` reported "not found" until it was
+  created explicitly.
+
+  So the declarations in `azure.yaml` are a statement of intent that survives
+  into version control; the project's actual routines are managed with the CLI:
+
+  ```powershell
+  azd ai routine create <name> --file <manifest.yaml>
+  azd ai routine disable <name>
+  azd ai routine show <name> -o json          # always confirm; the deploy will not
+  ```
+
+  Two traps in `create`. Without `--file` you cannot supply the action's
+  `input`, and a routine with no input sends an empty message — which this
+  agent treats as *drain the mailbox*, so a health-sweep routine would silently
+  run the wrong sweep. And the trigger is immutable: changing a cron or a
+  timezone returns `UserError: Routine trigger cannot be changed after
+  creation`, so amending one means delete and recreate.
+
 ## Reproducing it
 
 ```powershell
