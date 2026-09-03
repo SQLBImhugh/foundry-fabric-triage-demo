@@ -385,3 +385,31 @@ def test_every_setting_is_actually_read_somewhere() -> None:
         "them -- an operator who sets one and sees no effect has no way to tell "
         "the difference between a broken feature and a misunderstood one."
     )
+
+
+def test_the_hosting_library_stays_pinned_to_an_exact_version() -> None:
+    """The container's hosting library must be pinned, not floated.
+
+    agent-framework-foundry-hosting publishes date-stamped betas that make
+    breaking changes without a major bump. With a `>=1.0.0b1` floor, the
+    2026-09-03 release changed the default `history_source` to 'agent_server',
+    which refuses to construct against this repo's custom SupportsAgentRun
+    implementation. The next rebuild picked it up and the deployed container
+    crash-looped at startup, answering nothing until someone invoked it by hand.
+
+    Loosening this pin re-arms that failure, so it fails the suite instead.
+    """
+    requirements = (REPO_ROOT / "src" / "requirements.txt").read_text(
+        encoding="utf-8"
+    )
+    pins = [
+        line.strip()
+        for line in requirements.splitlines()
+        if line.strip().startswith("agent-framework-foundry-hosting")
+    ]
+    assert pins, "agent-framework-foundry-hosting is missing from src/requirements.txt"
+    assert all("==" in pin for pin in pins), (
+        f"the hosting library must be pinned exactly, found: {pins}. A floating "
+        "beta took the deployed agent down at startup once already. Bump the pin "
+        "deliberately and redeploy instead of removing it."
+    )

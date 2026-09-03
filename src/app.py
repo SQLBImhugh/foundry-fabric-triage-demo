@@ -322,7 +322,16 @@ def main() -> None:
         settings.triage_tool_mode,
         settings.graph_mailbox or "(none)",
     )
-    ResponsesHostServer(agent).run()
+    # history_source='agent' because this is a custom SupportsAgentRun
+    # implementation, not a RawAgent. The hosting library's default changed to
+    # 'agent_server', which refuses at construction: "requires a RawAgent so
+    # hosting can enforce downstream storage options".
+    #
+    # That default arrived through an unpinned dependency and took the deployed
+    # container down at startup -- the agent answered nothing for hours, and
+    # only a manual invocation found it. The version is pinned in
+    # requirements.txt now for the same reason.
+    ResponsesHostServer(agent, history_source="agent").run()
 
 
 if __name__ == "__main__":
