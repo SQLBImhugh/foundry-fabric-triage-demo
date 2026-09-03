@@ -10,52 +10,85 @@ demo script see [`run-sheet.md`](../demo/run-sheet.md).
 
 | Trigger | What it does | Off switch |
 |---|---|---|
-| New mail in the monitored mailbox | Filters, triages, acts or escalates | Disable the routine in the Foundry portal, or unset `GRAPH_MAILBOX` |
-| Scheduled sweep | Drains due retries, runs the silent-failure scan | `SILENT_SWEEP_ENABLED=false` |
+| `bitriage-mailbox-sweep` Logic App, every 5 min | Filters new mail, triages, acts or escalates | Disable the Logic App, or unset `GRAPH_MAILBOX` |
+| `bitriage-silent-sweep` Logic App, hourly | Drains due retries, runs the silent-failure scan | Disable the Logic App, or `SILENT_SWEEP_ENABLED=false` |
 | Approval reply | Applies or abandons a proposed Tier 2 action | Unset `APPROVAL_CALLBACK_URL` — with no gate configured, every gated action is refused |
 
-**Nothing above happens on a timer today.** The Foundry routine that should
-provide one is declared in `azure.yaml` but **ships disabled**, because it does
-not fire: it reports `enabled`, accepts dispatches, and never invokes the agent.
-Verified 2026-09-02, six days after registration, by three independent checks;
-see [`hosted-architecture.md`](hosted-architecture.md). Re-test it in your own
-tenant before enabling it — this may be regional, or already fixed.
+Neither Logic App exists until you deploy it, and nothing runs on a timer until
+you do.
 
-Until then, call the agent's endpoint from a scheduler you already trust. The
-two sweeps answer different questions and want different cadences:
+**Foundry routines do not fire.** The routines declared in `azure.yaml` **ship
+disabled**: a routine reports `enabled`, accepts dispatches, and never invokes
+the agent. Verified 2026-09-02, six days after registration, by three
+independent checks; see [`hosted-architecture.md`](hosted-architecture.md).
+Re-test in your own tenant before enabling — this may be regional, or already
+fixed.
+
+The trigger the accelerator actually supports is a Logic App:
+[`infra/scheduled-sweep.json`](../infra/scheduled-sweep.json). It authenticates
+with a system-assigned managed identity, so there is no key anywhere, and it
+keeps its own run history, so a sweep that fails is visible afterwards rather
+than being a thing that quietly stopped.
+
+Deploy it once per cadence. The two sweeps answer different questions:
 
 ```powershell
-azd ai agent invoke bi-triage-controller "sweep"          # every 5 min: drain the mailbox, perform due retries
-azd ai agent invoke bi-triage-controller "silent sweep"   # hourly: find models that failed without telling anyone
+$ep = (azd env get-values | Select-String AZURE_AI_PROJECT_ENDPOINT) -replace '.*="(.*)"','$1'
+
+# hourly: find models that failed without telling anyone
+az deployment group create -g <rg> --template-file infra/scheduled-sweep.json `
+  --parameters name=bitriage-silent-sweep projectEndpoint=$ep `
+               command="silent sweep" frequency=Hour interval=1 owner=<you>
+
+# every 5 min: drain the mailbox, perform due retries
+az deployment group create -g <rg> --template-file infra/scheduled-sweep.json `
+  --parameters name=bitriage-mailbox-sweep projectEndpoint=$ep `
+               command="sweep" frequency=Minute interval=5 owner=<you>
 ```
+
+Each deployment outputs a `principalId`, and that identity needs permission to
+invoke the agent before it will do anything — see
+[`provisioning.md`](provisioning.md). Until the grant lands, runs fail with 403,
+which is the correct behaviour and looks exactly like it should in run history.
 
 The mailbox sweep does **not** run the health scan — "what arrived" and "what is
 quietly wrong" are different questions, and only the first has an alert behind
-it. Schedule both or the detector never runs.
+it. Deploy both or the detector never runs.
 
 Hourly is enough for the second: a freshness probe on a daily model answers a
 question that changes once a day, and `executeQueries` is capped at 120/minute
 per user across every dataset, so polling hard makes the detector load on the
 capacity it is watching.
 
-Anything that can make an authenticated HTTPS call will do. The endpoint and the
-agent's own identity are in the azd environment:
+The `command` parameter is constrained to the two values the controller
+recognises. That constraint matters: the agent routes anything it does not
+recognise to "triage this text as an alert", so a typo would not fail — it would
+quietly triage the word `sweeep` as though it were a Power BI failure report,
+every five minutes, and look like it was working.
+
+The HTTP call does not retry. A sweep that times out is picked up by the next
+scheduled run instead, because a retry overlapping an in-flight triage can post
+twice before the first marks the message processed.
+
+Anything that can make an authenticated HTTPS call will do instead — Windows
+Task Scheduler, a cron job, a GitHub Actions schedule, an Azure Function timer.
+Prefer one that **reports its own failures**; a scheduler that stops silently
+reproduces the problem it was brought in to solve. The endpoint is in the azd
+environment:
 
 ```powershell
 azd env get-values | Select-String AGENT_BI_TRIAGE_CONTROLLER_RESPONSES_ENDPOINT
 ```
 
-Windows Task Scheduler, a cron job, a GitHub Actions schedule, an Azure
-Function timer or a Logic App recurrence are all fine. Prefer one that
-**reports its own failures** — a scheduler that stops silently reproduces the
-problem it was brought in to solve.
-
 The agent is unchanged either way: the scheduled path and the interactive path
 are the same code, so nothing needs rewriting when the platform catches up.
 
-**Check that it is actually running.** Nothing currently alerts on the agent
-having stopped, which is worth knowing given the above. The cheapest check is the
-incident store's newest timestamp:
+**Check that it is actually running.** Set `alertWebhookUrl` when deploying and
+a failed sweep posts a card to Teams; leave it empty and failures are visible in
+run history but nothing announces them. That gap is not hypothetical: an
+unpinned dependency crash-looped the container at startup, and because nothing
+watches, the agent answered nothing for hours until someone invoked it by hand.
+The cheapest independent check is the incident store's newest timestamp:
 
 ```powershell
 triage-demo incidents        # nothing new since yesterday on a busy mailbox is a signal

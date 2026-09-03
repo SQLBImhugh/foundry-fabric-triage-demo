@@ -12,6 +12,7 @@ trains people to update it without looking.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -243,6 +244,30 @@ def test_no_developer_machine_paths_are_committed() -> None:
     assert not offenders, f"developer-specific paths committed: {offenders}"
 
 
+def test_infra_templates_do_not_hardcode_an_owner() -> None:
+    """An `Owner` tag with a literal name in it is a personal identifier.
+
+    `approval-callback.json` shipped `"Owner": "mhugh"`. It is only a tag, so
+    nothing breaks -- which is why it survived a scrub that grepped the source
+    and the docs but not `infra/`.
+
+    Asserting the tag is a parameter reference rather than grepping for a
+    particular name keeps this from becoming a list of names in a public repo.
+    """
+    offenders: list[str] = []
+    for path in sorted((REPO_ROOT / "infra").glob("*.json")):
+        template = json.loads(path.read_text(encoding="utf-8"))
+        for resource in template.get("resources", []):
+            owner = resource.get("tags", {}).get("Owner")
+            if owner is not None and not owner.startswith("[parameters("):
+                offenders.append(f"{path.name}: Owner={owner!r}")
+
+    assert not offenders, (
+        f"infra templates hardcode an owner: {offenders}. Make it a parameter -- "
+        "whoever deploys this is not whoever wrote it."
+    )
+
+
 #: Safety properties that must appear in BOTH agent-contract files. Keyed on a
 #: distinctive phrase rather than the whole sentence, so wording can improve
 #: without the check turning into a copy-paste enforcer.
@@ -349,6 +374,24 @@ def test_routine_inputs_reach_a_command_the_agent_handles() -> None:
     assert not unhandled, (
         f"routine inputs no command handles: {unhandled}. These would be triaged "
         f"as alert text instead of running a sweep. Handled: {sorted(handled)}"
+    )
+
+    # The scheduler that actually fires carries the same risk in a second file.
+    # infra/scheduled-sweep.json constrains `command` with allowedValues, which
+    # stops a typo at deployment time -- but only while those values are still
+    # commands the controller recognises.
+    template = json.loads(
+        (REPO_ROOT / "infra" / "scheduled-sweep.json").read_text(encoding="utf-8")
+    )
+    allowed = template["parameters"]["command"]["allowedValues"]
+    assert allowed, "infra/scheduled-sweep.json no longer constrains 'command'"
+
+    unhandled = [c for c in allowed if c.strip().lower() not in handled]
+    assert not unhandled, (
+        f"scheduled-sweep.json offers commands nothing handles: {unhandled}. A "
+        f"Logic App deployed with one would post it every interval and the agent "
+        f"would triage the literal string as a Power BI alert. "
+        f"Handled: {sorted(handled)}"
     )
 
 

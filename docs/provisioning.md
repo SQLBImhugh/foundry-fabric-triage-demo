@@ -270,6 +270,52 @@ restricted (it is gated behind protected APIs / migration scenarios), so most
 production designs use a bot or a delegated flow rather than raw app-only Graph.
 Confirm the path against current docs before committing to it.
 
+## 6c. Scheduled sweeps
+
+Nothing runs on a timer until you deploy this. Foundry routines are declared in
+`azure.yaml` but ship disabled because they do not fire — see
+[`hosted-architecture.md`](hosted-architecture.md) for the evidence.
+
+Deploy [`infra/scheduled-sweep.json`](../infra/scheduled-sweep.json) once per
+cadence. It is a Consumption Logic App with a system-assigned managed identity
+that POSTs to the agent's responses endpoint:
+
+```powershell
+$ep = "https://<account>.services.ai.azure.com/api/projects/<project>"
+
+az deployment group create -g BITriageDemo -n sched-silent `
+  --template-file infra\scheduled-sweep.json `
+  --parameters name=bitriage-silent-sweep projectEndpoint=$ep `
+               command="silent sweep" frequency=Hour interval=1 owner=<you>
+
+# grant its identity permission to invoke the agent
+az role assignment create --assignee-object-id <principalId from the output> `
+  --assignee-principal-type ServicePrincipal `
+  --role "Cognitive Services User" `
+  --scope <the project resource id, not the account>
+```
+
+Repeat with `name=bitriage-mailbox-sweep`, `command="sweep"`,
+`frequency=Minute interval=5` for the mailbox drain. The two are separate jobs:
+the mailbox sweep does not run the health scan.
+
+`Cognitive Services User` is the role that carries data-plane access to a
+`Microsoft.CognitiveServices` account, which is what a Foundry project is.
+`Azure AI Developer` is not sufficient — its data actions are scoped to the
+`OpenAI`, `SpeechServices`, `ContentSafety` and `MaaS` sub-paths, and invoking a
+hosted agent is none of them. There is no `Azure AI User` role in this
+subscription despite the name appearing in some docs.
+
+Scope the assignment to the **project**, not the account, so the schedule can
+invoke this agent and nothing else.
+
+Until the grant propagates, runs fail with 403. That is correct behaviour and it
+is visible: the workflow terminates with `SweepFailed` rather than reporting
+success, so a failed sweep stays in run history as evidence.
+
+Set `alertWebhookUrl` to a Teams incoming webhook if a failed sweep should also
+announce itself. Without it, failures are recorded but nobody is told.
+
 ---
 
 ## 7. Data quality flag table

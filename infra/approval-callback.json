@@ -40,6 +40,13 @@
     "tableName": {
       "type": "string",
       "defaultValue": "approvals"
+    },
+    "owner": {
+      "type": "string",
+      "defaultValue": "unassigned",
+      "metadata": {
+        "description": "Tag value only. Set it to whoever should be asked before this is deleted."
+      }
     }
   },
   "variables": {
@@ -57,7 +64,7 @@
       },
       "tags": {
         "CostCenter": "demo",
-        "Owner": "mhugh",
+        "Owner": "[parameters('owner')]",
         "Environment": "demo",
         "DataClassification": "synthetic"
       },
