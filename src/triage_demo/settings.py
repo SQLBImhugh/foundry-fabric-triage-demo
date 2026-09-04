@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     # --- Foundry -----------------------------------------------------------
     foundry_project_endpoint: str = ""
-    foundry_triage_agent_name: str = "bi-triage"
+    foundry_triage_agent_name: str = "triage-demo"
     foundry_dq_agent_name: str = "bi-data-quality"
     foundry_agent_model: str = "gpt-5.6-luna"
     # Which agent-to-agent handoff shape the runtime uses.
@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     #                HOSTED agent speaking the 'a2a' protocol; a prompt agent
     #                publishes no agent card and the call fails at card fetch.
     foundry_handoff_mode: Literal["responses", "a2a"] = "responses"
-    foundry_guardrail_name: str = "bi-triage-guardrail"
+    foundry_guardrail_name: str = "triage-demo-guardrail"
 
     # --- Azure OpenAI (direct mode) ---------------------------------------
     azure_openai_endpoint: str = ""
@@ -95,6 +95,12 @@ class Settings(BaseSettings):
     retry_table_name: str = "deferredretries"
     #: Baselines for the silent-failure detector. Same endpoint again.
     semantic_health_table_name: str = "semantichealth"
+
+    #: Distributed claims, so two invocations cannot remediate the same alert.
+
+    #: Shares the incident table endpoint; only the table name is separate.
+
+    claim_table_name: str = "claims"
     #: The detector's off switch. Configuration rather than routine state,
     #: because `azd deploy` re-enables a disabled routine from azure.yaml.
     silent_sweep_enabled: bool = True

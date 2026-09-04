@@ -10,7 +10,7 @@
       "over six days, and Application Insights showed agent activity only in the",
       "hours containing a manual invocation. Both routines therefore ship",
       "disabled, and this is the trigger the accelerator actually supports.",
-      "docs/hosted-architecture.md records the evidence and the commands to",
+      "docs/foundry/README.md records the evidence and the commands to",
       "reproduce it.",
       "",
       "Deploy it twice with different parameters - once for the mailbox drain",
@@ -28,9 +28,16 @@
       "tenant requires. It also keeps its own run history, so a failed sweep is",
       "visible after the fact rather than being a thing that quietly stopped.",
       "",
+      "The HTTP timeout is PT10M and that number is not arbitrary: it must exceed",
+      "APPROVAL_TIMEOUT_SECONDS (default 300s), because a sweep that triages an",
+      "alert requiring approval blocks while it waits for a human. At the previous",
+      "PT3M the scheduler killed the run BEFORE the approval window closed, so a",
+      "person could approve inside the documented five minutes and find the work",
+      "had already been abandoned. Raise both together.",
+      "",
       "The identity needs permission to invoke the agent. That grant is not in",
       "this template because it is a role assignment on the Foundry project,",
-      "which is a different scope - see docs/provisioning.md."
+      "which is a different scope - see docs/DeploymentGuide.md."
     ]
   },
   "parameters": {
@@ -92,6 +99,20 @@
       "metadata": {
         "description": "Tag value only. Set it to whoever should be asked before this is deleted."
       }
+    },
+    "costCenter": {
+      "type": "string",
+      "defaultValue": "unassigned",
+      "metadata": {
+        "description": "Tag value only. Your chargeback code."
+      }
+    },
+    "environment": {
+      "type": "string",
+      "defaultValue": "evaluation",
+      "metadata": {
+        "description": "Tag value only, e.g. evaluation, test, production."
+      }
     }
   },
   "variables": {
@@ -108,9 +129,9 @@
         "type": "SystemAssigned"
       },
       "tags": {
-        "CostCenter": "demo",
+        "CostCenter": "[parameters('costCenter')]",
         "Owner": "[parameters('owner')]",
-        "Environment": "demo",
+        "Environment": "[parameters('environment')]",
         "DataClassification": "synthetic"
       },
       "properties": {
@@ -167,7 +188,7 @@
                 }
               },
               "limit": {
-                "timeout": "PT3M"
+                "timeout": "PT10M"
               }
             },
             "Did_it_fail": {
