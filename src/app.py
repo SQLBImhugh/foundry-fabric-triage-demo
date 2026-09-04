@@ -45,19 +45,20 @@ from agent_framework import (
 from agent_framework._agents import ResponseStream
 from agent_framework_foundry_hosting import ResponsesHostServer
 
+from triage_demo.observability import configure_telemetry
 from triage_demo.runner import TriageRunner
 from triage_demo.settings import settings
-from triage_demo.tools.inbox import BIRequest, parse_hints
+from triage_demo.tools.inbox import BIRequest, mailbox_scope_refusal, parse_hints
 
 logging.basicConfig(
     level=os.getenv("TRIAGE_LOG_LEVEL", "INFO"),
     format="%(levelname)s %(name)s %(message)s",
 )
-logger = logging.getLogger("triage.hosted")
+logger = logging.getLogger("triage_demo.hosted")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# A scheduled run says this. Anything else is treated as an alert to triage.
+# A scheduled run says this. Anything else is treated as an alert to triage_demo.
 # Deliberately an explicit sentinel rather than a heuristic: the first version
 # inferred "no alert" from a short message, and the host turned out to pass
 # conversation history, so a five-character sweep request arrived as several
@@ -123,7 +124,7 @@ class TriageControllerAgent(BaseAgent):
 
     def __init__(self) -> None:
         super().__init__(
-            name="bi-triage-controller",
+            name="triage-demo-controller",
             description=(
                 "Triages Power BI refresh failures: gathers deterministic evidence, "
                 "consults the data quality agent, and remediates within policy."
@@ -265,18 +266,27 @@ class TriageControllerAgent(BaseAgent):
                     "the agent's own identity."
                 )
 
-        # Fail closed. App-only Mail.Read is tenant-wide unless Exchange scopes
-        # it to a mailbox, so an unscoped agent could read the whole tenant.
-        # Refusing here is the difference between a bounded demo and an
-        # incident report.
+        # Fail closed, and that means all three ways this can be unproven: no
+        # canary configured (the shipped default), a check that did not
+        # complete, and a check that proved the agent can read it.
+        #
+        # The decision lives in triage_demo.tools.inbox so it can be tested without
+        # the hosting library. This used to refuse only the third case, while
+        # the comment here and the documentation both said it failed closed.
         verify_scope = getattr(inbox, "verify_scope", None)
-        if verify_scope is not None and settings.graph_canary_mailbox:
-            scope = await verify_scope(settings.graph_canary_mailbox)
-            if scope.get("checked") and not scope.get("scoped"):
-                return (
-                    "Refusing to read mail: this agent is not confined to "
-                    f"{settings.graph_mailbox}. {scope.get('reason', '')}"
-                )
+        if verify_scope is not None:
+            scope = (
+                await verify_scope(settings.graph_canary_mailbox)
+                if settings.graph_canary_mailbox
+                else {}
+            )
+            refusal = mailbox_scope_refusal(
+                scope=scope,
+                canary_mailbox=settings.graph_canary_mailbox,
+                mailbox=settings.graph_mailbox,
+            )
+            if refusal:
+                return refusal
 
         requests = await inbox.fetch(limit=10)
         if not requests:
@@ -315,6 +325,14 @@ def _summarise(artifacts: Any) -> str:
 
 
 def main() -> None:
+    # Telemetry has to be configured here, not only in the CLI. The hosted
+    # container is the deployment that most needs a trace -- nobody is watching
+    # a terminal -- and it was the one path that never called this, so
+    # APPLICATIONINSIGHTS_CONNECTION_STRING was set and produced nothing.
+    #
+    # Spans carry metadata only. Prompt and completion content is never attached.
+    configure_telemetry(settings.applicationinsights_connection_string)
+
     agent = TriageControllerAgent()
     logger.info(
         "Starting hosted triage controller (provider=%s, tools=%s, mailbox=%s)",
