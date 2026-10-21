@@ -18,7 +18,7 @@
 # reported it -- the agent simply answered nothing until someone invoked it by
 # hand. Bump this deliberately and redeploy, rather than discovering a new beta
 # during a demo.
-agent-framework-core>=1.17,<2
+agent-framework-core>=1.22.0,<2
 agent-framework-foundry-hosting==1.0.0b260903
 
 pydantic>=2.7
